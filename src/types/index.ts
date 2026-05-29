@@ -67,12 +67,14 @@ export interface ContactNote {
 }
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
+export type ConversationAutomationMode = 'agent' | 'human';
 
 export interface Conversation {
   id: string;
   user_id: string;
   contact_id: string;
   status: ConversationStatus;
+  automation_mode: ConversationAutomationMode;
   assigned_agent_id?: string;
   last_message_text?: string;
   last_message_at?: string;

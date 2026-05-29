@@ -26,6 +26,14 @@ export interface AutomationContext {
   message_text?: string
   /** Conversation the event belongs to, if any. */
   conversation_id?: string
+  /** Contact id for conversation-scoped triggers. */
+  contact_id?: string
+  /** Contact phone captured at dispatch time. */
+  customer_phone?: string
+  /** Contact display name captured at dispatch time. */
+  customer_name?: string
+  /** Conversation-level automation mode. */
+  automation_mode?: 'agent' | 'human'
   /** Arbitrary variables accumulated during execution. */
   vars?: Record<string, unknown>
   /** The tag id that was added, for tag_added trigger. */
@@ -422,6 +430,9 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
 
     case 'send_webhook': {
       const cfg = step.step_config as SendWebhookStepConfig
+      if (args.context.automation_mode === 'human') {
+        return 'webhook skipped (conversation in human mode)'
+      }
       if (!cfg.url) throw new Error('send_webhook needs url')
       const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
       const res = await fetch(cfg.url, {
@@ -542,6 +553,11 @@ function interpolate(s: string, args: ExecuteArgs): string {
   return s.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
     const [ns, prop] = String(key).split('.')
     if (ns === 'message' && prop === 'text') return String(args.context.message_text ?? '')
+    if (ns === 'conversation' && prop === 'id') return String(args.context.conversation_id ?? '')
+    if (ns === 'contact' && prop === 'id') return String(args.context.contact_id ?? '')
+    if (ns === 'customer' && prop === 'phone') return String(args.context.customer_phone ?? '')
+    if (ns === 'customer' && prop === 'name') return String(args.context.customer_name ?? '')
+    if (ns === 'automation' && prop === 'mode') return String(args.context.automation_mode ?? '')
     if (ns === 'vars' && prop) return String(args.context.vars?.[prop] ?? '')
     return ''
   })

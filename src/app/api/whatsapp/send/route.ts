@@ -279,6 +279,7 @@ export async function POST(request: Request) {
       .update({
         last_message_text: content_text || `[${message_type}]`,
         last_message_at: new Date().toISOString(),
+        automation_mode: 'human',
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversation_id)

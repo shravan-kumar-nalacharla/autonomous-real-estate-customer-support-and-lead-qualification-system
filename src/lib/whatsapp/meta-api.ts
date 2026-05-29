@@ -113,6 +113,52 @@ export async function sendTextMessage(
   return { messageId: data.messages[0].id }
 }
 
+export interface SendImageMessageArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  mediaId: string
+  caption?: string
+  /** Meta's message_id of the message being replied to. */
+  contextMessageId?: string
+}
+
+/**
+ * Send an image message using a previously-uploaded WhatsApp media id.
+ */
+export async function sendImageMessage(
+  args: SendImageMessageArgs
+): Promise<MetaSendResult> {
+  const { phoneNumberId, accessToken, to, mediaId, caption, contextMessageId } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/messages`
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'image',
+    image: {
+      id: mediaId,
+      ...(caption ? { caption } : {}),
+    },
+  }
+  if (contextMessageId) {
+    body.context = { message_id: contextMessageId }
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
+}
+
 export interface SendTemplateMessageArgs {
   phoneNumberId: string
   accessToken: string
@@ -556,4 +602,46 @@ export async function downloadMedia(
     response.headers.get('content-type') || 'application/octet-stream'
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
+}
+
+export interface UploadMediaFromBufferArgs {
+  phoneNumberId: string
+  accessToken: string
+  buffer: Buffer
+  filename: string
+  mimeType: string
+}
+
+/**
+ * Upload media bytes to WhatsApp and return Meta's media id.
+ */
+export async function uploadMediaFromBuffer(
+  args: UploadMediaFromBufferArgs
+): Promise<{ mediaId: string }> {
+  const { phoneNumberId, accessToken, buffer, filename, mimeType } = args
+  const formData = new FormData()
+  formData.append('messaging_product', 'whatsapp')
+  formData.append(
+    'file',
+    new Blob([new Uint8Array(buffer)], { type: mimeType || 'application/octet-stream' }),
+    filename || 'upload',
+  )
+
+  const response = await fetch(`${META_API_BASE}/${phoneNumberId}/media`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: formData,
+  })
+
+  if (!response.ok) {
+    await throwMetaError(response, `Media upload failed: ${response.status}`)
+  }
+
+  const data = await response.json()
+  if (!data?.id) {
+    throw new Error('Meta media upload succeeded but no media id was returned')
+  }
+  return { mediaId: data.id as string }
 }

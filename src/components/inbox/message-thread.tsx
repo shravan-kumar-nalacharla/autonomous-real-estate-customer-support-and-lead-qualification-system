@@ -10,6 +10,7 @@ import type {
   MessageReaction,
   Contact,
   ConversationStatus,
+  ConversationAutomationMode,
   MessageTemplate,
   Profile,
 } from "@/types";
@@ -31,7 +32,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import { MessageComposer } from "./message-composer";
@@ -63,6 +63,10 @@ interface MessageThreadProps {
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
+  ) => void;
+  onAutomationModeChange: (
+    conversationId: string,
+    mode: ConversationAutomationMode,
   ) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
@@ -119,6 +123,15 @@ const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string 
   { label: "Closed", value: "closed", color: "text-slate-400" },
 ];
 
+const AUTOMATION_MODE_OPTIONS: {
+  label: string;
+  value: ConversationAutomationMode;
+  color: string;
+}[] = [
+  { label: "Agent Mode", value: "agent", color: "text-primary" },
+  { label: "Human Mode", value: "human", color: "text-amber-300" },
+];
+
 /**
  * WhatsApp-style doodle background applied to the chat area (both the
  * active thread and the empty state). The SVG tile lives at
@@ -140,6 +153,7 @@ export function MessageThread({
   onUpdateMessage,
   onStatusChange,
   onAssignChange,
+  onAutomationModeChange,
   onBack,
   resyncToken = 0,
   onRefresh,
@@ -150,6 +164,7 @@ export function MessageThread({
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
+  const [isChangingAutomationMode, setIsChangingAutomationMode] = useState(false);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
   // parent's resyncToken); the 700ms spin is just feedback so the click
@@ -473,6 +488,59 @@ export function MessageThread({
     [conversation, onNewMessage, onUpdateMessage]
   );
 
+  const handleSendMedia = useCallback(
+    async (file: File, caption?: string, replyToId?: string) => {
+      if (!conversation) return;
+
+      const tempId = `temp-${Date.now()}`;
+      const captionText = caption?.trim() || "";
+      const previewUrl = URL.createObjectURL(file);
+
+      const optimisticMsg: Message = {
+        id: tempId,
+        conversation_id: conversation.id,
+        sender_type: "agent",
+        content_type: "image",
+        content_text: captionText || undefined,
+        media_url: previewUrl,
+        status: "sending",
+        created_at: new Date().toISOString(),
+        reply_to_message_id: replyToId,
+      };
+      onNewMessage(optimisticMsg);
+      setReplyTo(null);
+
+      try {
+        const formData = new FormData();
+        formData.append("conversation_id", conversation.id);
+        formData.append("message_type", "image");
+        if (captionText) formData.append("caption", captionText);
+        if (replyToId) formData.append("reply_to_message_id", replyToId);
+        formData.append("file", file, file.name || "image.jpg");
+
+        const res = await fetch("/api/whatsapp/send-media", {
+          method: "POST",
+          body: formData,
+        });
+
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const reason = payload?.error || `HTTP ${res.status}`;
+          toast.error(`Failed to send image: ${reason}`);
+          onUpdateMessage(tempId, { status: "failed" });
+          return;
+        }
+
+        onUpdateMessage(tempId, { status: "sent" });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "network error";
+        toast.error(`Failed to send image: ${reason}`);
+        onUpdateMessage(tempId, { status: "failed" });
+      }
+    },
+    [conversation, onNewMessage, onUpdateMessage],
+  );
+
   const handleStatusChange = useCallback(
     async (status: ConversationStatus) => {
       if (!conversation) return;
@@ -486,6 +554,36 @@ export function MessageThread({
       onStatusChange(conversation.id, status);
     },
     [conversation, onStatusChange]
+  );
+
+  const handleAutomationModeChange = useCallback(
+    async (mode: ConversationAutomationMode) => {
+      if (!conversation) return;
+
+      const current = conversation.automation_mode ?? "agent";
+      if (mode === current || isChangingAutomationMode) return;
+
+      onAutomationModeChange(conversation.id, mode);
+      setIsChangingAutomationMode(true);
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ automation_mode: mode })
+        .eq("id", conversation.id);
+
+      setIsChangingAutomationMode(false);
+
+      if (error) {
+        console.error("Failed to update automation mode:", error);
+        onAutomationModeChange(conversation.id, current);
+        toast.error("Failed to update conversation mode");
+        return;
+      }
+
+      toast.success(mode === "human" ? "Human Mode enabled" : "Agent Mode enabled");
+    },
+    [conversation, isChangingAutomationMode, onAutomationModeChange],
   );
 
   const handleOpenTemplates = useCallback(() => {
@@ -697,6 +795,10 @@ export function MessageThread({
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
   );
+  const currentAutomationMode = conversation.automation_mode ?? "agent";
+  const currentAutomationModeOption = AUTOMATION_MODE_OPTIONS.find(
+    (opt) => opt.value === currentAutomationMode,
+  );
   const assignedAgentId = conversation.assigned_agent_id ?? null;
   const currentAssignee = profiles.find((p) => p.user_id === assignedAgentId);
   const assignLabel = assignedAgentId
@@ -782,6 +884,34 @@ export function MessageThread({
                 <DropdownMenuItem
                   key={opt.value}
                   onClick={() => handleStatusChange(opt.value)}
+                  className={cn("text-sm", opt.color)}
+                >
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Agent/Human automation mode dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              disabled={isChangingAutomationMode}
+              className={cn(
+                "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60",
+                currentAutomationModeOption?.color ?? "text-slate-400",
+              )}
+            >
+              {currentAutomationModeOption?.label ?? "Agent Mode"}
+              <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="border-slate-700 bg-slate-800"
+            >
+              {AUTOMATION_MODE_OPTIONS.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onClick={() => handleAutomationModeChange(opt.value)}
                   className={cn("text-sm", opt.color)}
                 >
                   {opt.label}
@@ -925,6 +1055,7 @@ export function MessageThread({
         conversationId={conversation.id}
         sessionExpired={sessionInfo.expired}
         onSend={handleSend}
+        onSendMedia={handleSendMedia}
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}

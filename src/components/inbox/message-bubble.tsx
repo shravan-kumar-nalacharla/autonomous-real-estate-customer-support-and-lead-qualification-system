@@ -13,10 +13,15 @@ import {
   LayoutTemplate,
   ImageOff,
   CornerDownLeft,
+  ExternalLink,
+  Download,
+  Copy,
+  Link as LinkIcon,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import { toast } from "sonner";
 
 interface MessageBubbleProps {
   message: Message;
@@ -116,6 +121,136 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
+function mediaFilename(url: string, fallback: string): string {
+  try {
+    const pathname = new URL(url, window.location.origin).pathname;
+    const last = pathname.split("/").filter(Boolean).pop();
+    if (!last) return fallback;
+    return decodeURIComponent(last);
+  } catch {
+    return fallback;
+  }
+}
+
+async function fetchMediaBlob(url: string): Promise<Blob> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
+function MediaActions({
+  url,
+  kind,
+}: {
+  url: string;
+  kind: "image" | "document";
+}) {
+  const openInNewTab = useCallback(() => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [url]);
+
+  const download = useCallback(async () => {
+    try {
+      const blob = await fetchMediaBlob(url);
+      const fileUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = fileUrl;
+      anchor.download = mediaFilename(
+        url,
+        kind === "image" ? "image" : "document",
+      );
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(fileUrl);
+    } catch (error) {
+      toast.error(
+        `Download failed: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
+    }
+  }, [kind, url]);
+
+  const copyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied");
+    } catch {
+      toast.error("Failed to copy link");
+    }
+  }, [url]);
+
+  const copyImage = useCallback(async () => {
+    if (kind !== "image") return;
+    try {
+      const blob = await fetchMediaBlob(url);
+      const ClipboardItemCtor = window.ClipboardItem;
+      if (!ClipboardItemCtor || !navigator.clipboard?.write) {
+        throw new Error("Clipboard image API not supported");
+      }
+      await navigator.clipboard.write([
+        new ClipboardItemCtor({
+          [blob.type || "image/png"]: blob,
+        }),
+      ]);
+      toast.success("Image copied");
+    } catch {
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Image copy unavailable, link copied instead");
+      } catch {
+        toast.error("Failed to copy image");
+      }
+    }
+  }, [kind, url]);
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      <button
+        type="button"
+        onClick={openInNewTab}
+        className="inline-flex items-center gap-1 rounded bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-slate-900"
+      >
+        <ExternalLink className="h-3 w-3" />
+        Open
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void download();
+        }}
+        className="inline-flex items-center gap-1 rounded bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-slate-900"
+      >
+        <Download className="h-3 w-3" />
+        Download
+      </button>
+      {kind === "image" && (
+        <button
+          type="button"
+          onClick={() => {
+            void copyImage();
+          }}
+          className="inline-flex items-center gap-1 rounded bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-slate-900"
+        >
+          <Copy className="h-3 w-3" />
+          Copy image
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          void copyLink();
+        }}
+        className="inline-flex items-center gap-1 rounded bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-200 hover:bg-slate-900"
+      >
+        <LinkIcon className="h-3 w-3" />
+        Copy link
+      </button>
+    </div>
+  );
+}
+
 function MessageContent({ message }: { message: Message }) {
   switch (message.content_type) {
     case "text":
@@ -129,7 +264,10 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <MediaImage url={message.media_url} alt="Shared image" />
+            <>
+              <MediaImage url={message.media_url} alt="Shared image" />
+              <MediaActions url={message.media_url} kind="image" />
+            </>
           ) : (
             <MediaUnavailable label="Image" />
           )}
@@ -177,17 +315,20 @@ function MessageContent({ message }: { message: Message }) {
         return <MediaUnavailable label={message.content_text || "Document"} />;
       }
       return (
-        <a
-          href={message.media_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-slate-700/50 px-3 py-2 text-sm hover:bg-slate-700"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-slate-400" />
-          <span className="truncate">
-            {message.content_text || "Document"}
-          </span>
-        </a>
+        <div>
+          <a
+            href={message.media_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-lg bg-slate-700/50 px-3 py-2 text-sm hover:bg-slate-700"
+          >
+            <FileText className="h-5 w-5 shrink-0 text-slate-400" />
+            <span className="truncate">
+              {message.content_text || "Document"}
+            </span>
+          </a>
+          <MediaActions url={message.media_url} kind="document" />
+        </div>
       );
 
     case "template":
