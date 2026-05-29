@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { N8N_TRIGGER_EVENTS, isN8nEvent } from "@/lib/n8n-types";
+import {
+  deleteFallbackWorkflow,
+  getFallbackWorkflowById,
+  isMissingN8nTableError,
+  updateFallbackWorkflow,
+} from "@/lib/n8n-fallback-store";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "name",
@@ -29,7 +35,7 @@ async function requireAuthenticatedClient() {
   } = await supabase.auth.getUser();
 
   if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase };
+  return { ok: true as const, supabase, user };
 }
 
 export async function GET(
@@ -51,7 +57,30 @@ export async function GET(
     .single();
 
   if (error || !data) {
-    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    }
+    try {
+      const workflow = await getFallbackWorkflowById(
+        guard.supabase,
+        guard.user.id,
+        id,
+      );
+      if (!workflow) {
+        return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+      }
+      return NextResponse.json({ workflow }, { status: 200 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to load workflow",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ workflow: data }, { status: 200 });
@@ -142,10 +171,35 @@ export async function PATCH(
     .single();
 
   if (error || !data) {
-    return NextResponse.json(
-      { error: error?.message ?? "Workflow not found" },
-      { status: 404 },
-    );
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json(
+        { error: error?.message ?? "Workflow not found" },
+        { status: 404 },
+      );
+    }
+
+    try {
+      const workflow = await updateFallbackWorkflow(
+        guard.supabase,
+        guard.user.id,
+        id,
+        updateData,
+      );
+      if (!workflow) {
+        return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+      }
+      return NextResponse.json({ workflow }, { status: 200 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to update workflow",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ workflow: data }, { status: 200 });
@@ -169,7 +223,26 @@ export async function DELETE(
     .eq("id", id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    try {
+      const deleted = await deleteFallbackWorkflow(guard.supabase, guard.user.id, id);
+      if (!deleted) {
+        return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+      }
+      return NextResponse.json({ success: true }, { status: 200 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to delete workflow",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ success: true }, { status: 200 });
