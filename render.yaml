@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: whatsapp-crm
+    runtime: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -- -H 0.0.0.0 -p $PORT
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: N8N_WHATSAPP_FORWARD_WEBHOOK_URL
+        sync: false
+      - key: N8N_WHATSAPP_FORWARD_SECRET
+        sync: false
