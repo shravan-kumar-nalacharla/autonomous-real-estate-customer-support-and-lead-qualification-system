@@ -44,6 +44,7 @@ export async function GET(
   const { id } = await context.params;
 
   const { data, error } = await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .select("*")
     .eq("id", id)
@@ -133,6 +134,7 @@ export async function PATCH(
   updateData.updated_at = new Date().toISOString();
 
   const { data, error } = await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .update(updateData)
     .eq("id", id)
@@ -161,6 +163,7 @@ export async function DELETE(
   const { id } = await context.params;
 
   const { error } = await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .delete()
     .eq("id", id);

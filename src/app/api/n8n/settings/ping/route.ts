@@ -29,6 +29,7 @@ async function getExistingSettings(
   supabase: Awaited<ReturnType<typeof createClient>>,
 ) {
   const { data, error } = await supabase
+    .schema("public")
     .from("n8n_settings")
     .select("*")
     .order("created_at", { ascending: true })
@@ -120,10 +121,14 @@ export async function POST(request: Request) {
 
   const persistResult = existing.data?.id
     ? await guard.supabase
+        .schema("public")
         .from("n8n_settings")
         .update(updateData)
         .eq("id", existing.data.id)
-    : await guard.supabase.from("n8n_settings").insert(updateData);
+    : await guard.supabase
+        .schema("public")
+        .from("n8n_settings")
+        .insert(updateData);
 
   if (persistResult.error) {
     return NextResponse.json(

@@ -28,6 +28,7 @@ export async function GET() {
   }
 
   const { data, error } = await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .select("*")
     .order("created_at", { ascending: false });
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
   }
 
   const { data, error } = await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .insert({
       name,

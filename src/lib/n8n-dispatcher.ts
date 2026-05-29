@@ -16,6 +16,7 @@ export async function dispatchN8nEvent(
     const supabase = await createClient();
 
     const { data: workflows } = await supabase
+      .schema("public")
       .from("n8n_workflows")
       .select("*")
       .eq("trigger_event", event)
@@ -62,6 +63,7 @@ export async function dispatchN8nEvent(
         }
 
         void supabase
+          .schema("public")
           .from("n8n_workflows")
           .update({
             last_triggered_at: new Date().toISOString(),

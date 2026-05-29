@@ -25,6 +25,7 @@ export async function POST(
   const { id } = await context.params;
 
   const { data, error } = await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .select("*")
     .eq("id", id)
@@ -86,6 +87,7 @@ export async function POST(
   }
 
   await guard.supabase
+    .schema("public")
     .from("n8n_workflows")
     .update({
       last_triggered_at: new Date().toISOString(),
