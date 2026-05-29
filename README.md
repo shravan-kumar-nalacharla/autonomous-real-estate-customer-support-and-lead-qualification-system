@@ -1,120 +1,54 @@
-# wacrm — CRM Template for WhatsApp
+# Huygen Warp
 
-> Self-hostable CRM template for WhatsApp® — shared inbox, contacts,
-> sales pipelines, broadcasts, and no-code automations. Fork it, brand
-> it, host it.
+> WhatsApp AI CRM & automation platform. Self-hostable, open-source fork.
 
-[![Deploy on Hostinger](https://img.shields.io/badge/Deploy_on-Hostinger-673DE6?style=for-the-badge&logo=hostinger&logoColor=white)](https://www.hostinger.com/web-apps-hosting)
+Based on [wacrm](https://github.com/ArnasDon/wacrm) by ArnasDon (MIT License).
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](./LICENSE)
-[![CI](https://github.com/ArnasDon/wacrm/actions/workflows/ci.yml/badge.svg)](https://github.com/ArnasDon/wacrm/actions/workflows/ci.yml)
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org)
-[![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth-3ecf8e?logo=supabase)](https://supabase.com)
-[![Stars](https://img.shields.io/github/stars/ArnasDon/wacrm?style=social)](https://github.com/ArnasDon/wacrm/stargazers)
+## What's new in Huygen Warp
 
-The marketing site and self-host docs live in a separate repo:
-[ArnasDon/wacrm-site](https://github.com/ArnasDon/wacrm-site)
-([wacrm.tech](https://wacrm.tech)). This repo is the product —
-clone or fork it to run your own CRM.
-
-## What you get out of the box
-
-- **Shared inbox** on the official WhatsApp Business API — multiple
-  agents working one number, per-conversation assignment, status, and
-  notes.
-- **Contacts + tags + custom fields**, CSV import, deduplication.
-- **Sales pipelines** (Kanban) with deals linked to conversations.
-- **Broadcasts** with Meta-approved templates, delivery + read
-  tracking, per-recipient variable substitution.
-- **No-code automations** — triggers on inbound messages, new
-  contacts, keywords, or schedule; conditional branches, waits,
-  tags, webhooks. Visual builder.
-- **Real-time dashboard** — response times, daily volume, pipeline
-  value, cross-module activity feed.
-- **Account management** — email, password, avatar, global sign-out.
-
-## Why fork this?
-
-This is a **template**, not a product. Forking means you get:
-
-- **Full ownership** — your code, your Supabase project, your domain,
-  your data. No SaaS lock-in, no seat pricing, no trust dance.
-- **Full customisation** — add the fields your team needs, remove the
-  modules you don't, redesign anything. The stack is boring on
-  purpose (Next.js + Supabase + Tailwind) so the learning curve is
-  short.
-- **Zero ops to start** — Hostinger Managed Node.js deploys a fork in
-  a few clicks. No Docker, no Kubernetes, no infra team needed.
-- **Real security primitives** — token encryption (AES-256-GCM), RLS
-  on every table, HMAC-verified webhooks, CSP, rate limiting, CI
-  typecheck/build on every PR.
-
-Not a framework. Not an SDK. A concrete, working CRM you can stand up
-in an afternoon and make yours.
+- **Rebranded UI** - clean, minimal Anthropic-inspired design system
+- **n8n Workflows page** - connect your self-hosted n8n instance, manage webhook
+  automations per-event, toggle on/off without touching code
+- **Full wacrm feature set** - shared WhatsApp inbox, contacts, pipeline, broadcasts,
+  no-code automations, dashboard
 
 ## Quick start
 
 ```bash
-# Fork on GitHub first: https://github.com/ArnasDon/wacrm → Fork
-git clone https://github.com/<your-username>/wacrm.git
-cd wacrm
+git clone https://github.com/<your-username>/huygen-warp.git
+cd huygen-warp
 npm install
 cp .env.local.example .env.local   # fill in Supabase + Meta creds
 npm run dev
 ```
 
-Open <http://localhost:3000>. You'll be redirected to `/login` (or
-`/dashboard` if already signed in).
+## n8n Integration
 
-## Deploy On Render
+1. Host n8n (we use [Render.com](https://render.com) - free tier works)
+2. In n8n: create a Webhook node -> copy the webhook URL
+3. In Huygen Warp: go to **n8n Workflows** in the sidebar
+4. Click **+ Add Workflow**, paste the webhook URL, choose your trigger event
+5. Toggle the workflow ON - events will start flowing
 
-1. Push this repo to GitHub.
-2. In Render, create a new Web Service from the repo root.
-3. Render auto-detects `render.yaml` in this repo and applies:
-  - Build command: `npm ci && npm run build`
-  - Start command: `npm run start -- -H 0.0.0.0 -p $PORT`
-4. Fill all `sync: false` env vars in Render before the first deploy.
-5. Set `NEXT_PUBLIC_SITE_URL` to your Render HTTPS URL.
-6. In Meta App Dashboard, update webhook callback URL to:
-  `https://<your-render-domain>/api/whatsapp/webhook`
-7. Re-verify webhook and confirm `messages` field is subscribed on
-  `whatsapp_business_account`.
+The platform sends a POST request to your n8n webhook on every CRM event:
 
-If you use n8n in parallel, set `N8N_WHATSAPP_FORWARD_WEBHOOK_URL`
-and optionally `N8N_WHATSAPP_FORWARD_SECRET`. The CRM remains Meta's
-single callback URL and forwards inbound payloads to n8n.
-
-## Documentation
-
-Full self-host documentation — Supabase migrations, WhatsApp Business
-API config, and production deploy — lives at
-**[wacrm.tech/docs](https://wacrm.tech/docs)**
-(source: [ArnasDon/wacrm-site](https://github.com/ArnasDon/wacrm-site)).
-
-Key pages:
-- [Getting started](https://wacrm.tech/docs/getting-started)
-- [Supabase setup](https://wacrm.tech/docs/supabase-setup)
-- [WhatsApp setup](https://wacrm.tech/docs/whatsapp-setup)
-- [Environment variables](https://wacrm.tech/docs/environment-variables)
-- [Deploy on Hostinger](https://wacrm.tech/docs/deployment-hostinger)
-- [Architecture](https://wacrm.tech/docs/architecture)
-- [Troubleshooting](https://wacrm.tech/docs/troubleshooting)
+```json
+{
+  "event": "message.received",
+  "payload": { "contactId": "...", "message": "...", "customerPhone": "..." },
+  "timestamp": "2025-01-01T00:00:00.000Z",
+  "source": "huygen-warp"
+}
+```
 
 ## Stack
 
-- **App** — Next.js 16 (App Router), React 19, TypeScript, Tailwind v4.
-- **Data** — Supabase (Postgres + Auth + Storage + RLS).
-- **WhatsApp** — Meta Cloud API (official WhatsApp Business API).
-
-## Contributing
-
-This is a template, not a collaborative product — the expected flow is
-fork → customise → deploy, **not** upstream contribution. Bug reports
-and security issues are welcome; feature PRs often belong in your fork
-rather than here. Details in
-[`CONTRIBUTING.md`](./CONTRIBUTING.md) and
-[`.github/SECURITY.md`](./.github/SECURITY.md).
+- Next.js 16 (App Router) - React 19 - TypeScript - Tailwind v4
+- Supabase (Postgres + Auth + RLS)
+- WhatsApp Business API (Meta Cloud API)
+- n8n (self-hosted webhooks)
 
 ## License
 
-[MIT](./LICENSE). Fork it, brand it, host it.
+MIT - fork it, brand it, ship it.
+Attribution: Based on wacrm by ArnasDon.

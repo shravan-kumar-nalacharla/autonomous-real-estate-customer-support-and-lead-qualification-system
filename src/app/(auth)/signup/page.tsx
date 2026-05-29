@@ -25,7 +25,6 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const router = useRouter();
-  const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +41,8 @@ export default function SignupPage() {
     }
 
     setLoading(true);
+
+    const supabase = createClient();
 
     const {
       data: { session },
@@ -114,7 +115,7 @@ export default function SignupPage() {
           </div>
           <CardTitle className="text-xl text-white">Create account</CardTitle>
           <CardDescription className="text-slate-400">
-            Get started with CRM Template for WhatsApp
+            Get started with Huygen Warp
           </CardDescription>
         </CardHeader>
         <CardContent>

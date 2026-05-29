@@ -36,10 +36,10 @@ export default function RootPage() {
   }, []);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-slate-800 bg-slate-900 p-6 text-center">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg-base)] px-4">
+      <div className="flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-center shadow-[var(--shadow-sm)]">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p className="text-sm text-slate-300">Redirecting...</p>
+        <p className="text-sm text-[var(--text-secondary)]">Redirecting...</p>
       </div>
     </div>
   );

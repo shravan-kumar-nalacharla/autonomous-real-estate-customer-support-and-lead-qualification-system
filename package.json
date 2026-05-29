@@ -1,8 +1,8 @@
 {
-  "name": "wacrm",
+  "name": "huygen-warp",
   "version": "0.2.1",
   "private": true,
-  "description": "Self-hostable CRM template for WhatsApp built on Next.js and Supabase — shared inbox, contacts, sales pipelines, broadcasts, and no-code automations.",
+  "description": "Huygen Warp - WhatsApp AI CRM & automation platform. Self-hostable. Based on wacrm (MIT).",
   "license": "MIT",
   "author": "Arnas Donauskas",
   "homepage": "https://github.com/ArnasDon/wacrm",

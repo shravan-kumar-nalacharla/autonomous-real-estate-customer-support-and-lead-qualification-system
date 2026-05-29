@@ -1,29 +1,26 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import {
-  LayoutDashboard,
-  MessageSquare,
-  Users,
+  BarChart3,
   GitBranch,
-  Radio,
-  Zap,
-  Workflow,
-  Settings,
   LogOut,
+  MessageSquare,
+  Radio,
+  Settings,
   User,
+  Users,
+  Workflow,
   X,
+  Zap,
 } from "lucide-react";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,30 +32,28 @@ import {
 interface NavItem {
   href: string;
   label: string;
-  icon: typeof LayoutDashboard;
-  /**
-   * When true, the nav row renders a small "Beta" chip after the label.
-   * Purely informational — doesn't affect routing or access.
-   */
-  beta?: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: string;
 }
 
-const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+const mainNavItems: NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/contacts", label: "Contacts", icon: Users },
-  { href: "/pipelines", label: "Pipelines", icon: GitBranch },
+  { href: "/pipelines", label: "Pipeline", icon: GitBranch },
   { href: "/broadcasts", label: "Broadcasts", icon: Radio },
-  { href: "/automations", label: "Automations", icon: Zap },
-  { href: "/flows", label: "Flows", icon: Workflow, beta: true },
+  { href: "/automations", label: "Automations", icon: Workflow },
+  { href: "/dashboard", label: "Analytics", icon: BarChart3 },
 ];
 
-const bottomNavItems = [
+const automationNavItems: NavItem[] = [
+  { href: "/n8n-workflows", label: "n8n Workflows", icon: Zap, badge: "n8n" },
+];
+
+const bottomNavItems: NavItem[] = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 interface SidebarProps {
-  /** Controlled on mobile by the Header's hamburger button. Ignored on lg+. */
   open?: boolean;
   onClose?: () => void;
 }
@@ -67,42 +62,92 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
   const totalUnread = useTotalUnread();
+  const [n8nConnected, setN8nConnected] = useState(false);
+  const [hasActiveWorkflows, setHasActiveWorkflows] = useState(false);
 
-  // Close the drawer when route changes — users opened it to navigate,
-  // so once they pick a destination the drawer should get out of the way.
   useEffect(() => {
     onClose?.();
-    // Only pathname drives this — onClose identity doesn't need to re-run it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // Lock body scroll and allow Escape to close while the drawer is open on
-  // mobile. No-ops on desktop because the sidebar isn't positioned there.
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose?.();
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKeydown);
     return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeydown);
     };
   }, [open, onClose]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadN8nState = async () => {
+      try {
+        const [settingsRes, workflowsRes] = await Promise.all([
+          fetch("/api/n8n/settings", { cache: "no-store" }),
+          fetch("/api/n8n/workflows", { cache: "no-store" }),
+        ]);
+        if (!settingsRes.ok || !workflowsRes.ok || cancelled) return;
+        const settingsJson = (await settingsRes.json()) as {
+          settings?: { is_connected?: boolean | null };
+        };
+        const workflowsJson = (await workflowsRes.json()) as {
+          workflows?: Array<{ is_active?: boolean | null }>;
+        };
+        if (cancelled) return;
+        const connected = Boolean(settingsJson.settings?.is_connected);
+        const hasActive = Boolean(
+          workflowsJson.workflows?.some((workflow) => workflow.is_active),
+        );
+        setN8nConnected(connected);
+        setHasActiveWorkflows(hasActive);
+      } catch {
+        if (!cancelled) {
+          setN8nConnected(false);
+          setHasActiveWorkflows(false);
+        }
+      }
+    };
+    void loadN8nState();
+    const interval = window.setInterval(loadN8nState, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const userInitial = useMemo(
+    () =>
+      profile?.full_name?.charAt(0)?.toUpperCase() ??
+      profile?.email?.charAt(0)?.toUpperCase() ??
+      "U",
+    [profile?.email, profile?.full_name],
+  );
+
+  const isActiveRoute = (href: string) =>
+    pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+
+  const navItemClasses = (active: boolean) =>
+    cn(
+      "flex w-full items-center gap-3 rounded-[var(--radius-md)] border-l-2 border-transparent px-3 py-2 text-[13px] transition-colors",
+      active
+        ? "border-[var(--accent)] bg-[var(--bg-active)] font-medium text-[var(--text-primary)]"
+        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+    );
+
   return (
     <>
-      {/* Backdrop — only exists on mobile and only when open. Clicking
-          it closes the drawer. Hidden from lg+ since the sidebar is
-          part of the main flex row there. */}
       <button
         type="button"
         aria-label="Close menu"
         onClick={onClose}
         className={cn(
-          "fixed inset-0 z-30 bg-slate-950/70 backdrop-blur-sm transition-opacity lg:hidden",
+          "fixed inset-0 z-30 bg-[rgba(26,23,20,0.28)] backdrop-blur-[1px] transition-opacity lg:hidden",
           open
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0",
@@ -111,77 +156,56 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
       <aside
         className={cn(
-          // Mobile: fixed drawer that slides in from the left.
-          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-slate-800 bg-slate-900",
-          "transition-transform duration-200 ease-out will-change-transform",
+          "fixed inset-y-0 left-0 z-40 flex h-full w-60 flex-col border-r border-[var(--border)] bg-[var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
-          // Desktop: static, always visible — reset all the mobile framing.
-          "lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:transition-none",
+          "lg:static lg:z-0 lg:translate-x-0 lg:transition-none",
         )}
         aria-label="Primary"
       >
-        {/* Logo row. On mobile we put a close button here; on desktop the
-            close button is hidden since the sidebar is always-visible. */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-4">
+        <div className="flex h-14 shrink-0 items-center justify-between px-4 pt-1">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <MessageSquare className="h-4 w-4" />
-            </div>
-            <span className="text-sm font-semibold text-white">
-              CRM Template for WhatsApp
+            <Image
+              src="/logo.svg"
+              alt="Huygen Warp"
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-[8px]"
+            />
+            <span className="truncate text-sm font-semibold text-[var(--text-primary)]">
+              Huygen Warp
             </span>
           </Link>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close menu"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Main navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
+        <nav className="flex-1 overflow-y-auto px-3 py-3">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/dashboard" && pathname.startsWith(item.href));
-
+            {mainNavItems.map((item) => {
+              const active = isActiveRoute(item.href);
+              const Icon = item.icon;
               const showUnreadDot =
-                item.href === "/inbox" && totalUnread > 0 && !isActive;
-
+                item.href === "/inbox" && totalUnread > 0 && !active;
               return (
                 <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      // Taller on mobile so fingers can hit the row reliably (≥44px).
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-white",
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
+                  <Link href={item.href} className={navItemClasses(active)}>
+                    <Icon
+                      className={cn(
+                        "h-4 w-4",
+                        active
+                          ? "text-[var(--accent)]"
+                          : "text-[var(--text-secondary)]",
+                      )}
+                    />
                     <span className="flex-1">{item.label}</span>
-                    {item.beta && (
-                      <span
-                        aria-label="Beta feature"
-                        className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300"
-                      >
-                        Beta
-                      </span>
-                    )}
                     {showUnreadDot && (
-                      <span
-                        aria-label={`${totalUnread} unread conversation${totalUnread === 1 ? "" : "s"}`}
-                        className="relative flex h-2 w-2"
-                      >
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                      </span>
+                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
                     )}
                   </Link>
                 </li>
@@ -189,24 +213,56 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             })}
           </ul>
 
-          <div className="my-4 border-t border-slate-800" />
+          <div className="my-2 border-t border-[var(--border)]" />
+
+          <ul className="flex flex-col gap-1">
+            {automationNavItems.map((item) => {
+              const active = isActiveRoute(item.href);
+              const Icon = item.icon;
+              return (
+                <li key={item.href}>
+                  <Link href={item.href} className={navItemClasses(active)}>
+                    <Icon
+                      className={cn(
+                        "h-4 w-4",
+                        active
+                          ? "text-[var(--n8n-orange)]"
+                          : "text-[var(--text-secondary)]",
+                      )}
+                    />
+                    <span className="flex-1">{item.label}</span>
+                    {item.badge ? (
+                      <span className="rounded-full bg-[var(--n8n-orange)] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        {item.badge}
+                      </span>
+                    ) : null}
+                    {n8nConnected && hasActiveWorkflows ? (
+                      <span className="ml-1 h-1.5 w-1.5 rounded-full bg-[var(--n8n-orange)]" />
+                    ) : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="my-2 border-t border-[var(--border)]" />
 
           <ul className="flex flex-col gap-1">
             {bottomNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
+              const active = isActiveRoute(item.href);
+              const Icon = item.icon;
               return (
                 <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-slate-400 hover:bg-slate-800 hover:text-white",
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
+                  <Link href={item.href} className={navItemClasses(active)}>
+                    <Icon
+                      className={cn(
+                        "h-4 w-4",
+                        active
+                          ? "text-[var(--accent)]"
+                          : "text-[var(--text-secondary)]",
+                      )}
+                    />
+                    <span>{item.label}</span>
                   </Link>
                 </li>
               );
@@ -214,10 +270,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           </ul>
         </nav>
 
-        {/* User section */}
-        <div className="shrink-0 border-t border-slate-800 p-3">
+        <div className="shrink-0 border-t border-[var(--border)] p-3">
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-800/60 focus:bg-slate-800/60 focus:outline-none data-popup-open:bg-slate-800/60">
+            <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left transition-colors hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-hover)] focus:outline-none data-popup-open:bg-[var(--bg-hover)]">
               <Avatar className="size-8 shrink-0">
                 {profile?.avatar_url ? (
                   <AvatarImage
@@ -225,17 +280,15 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     alt={profile.full_name ?? "Avatar"}
                   />
                 ) : null}
-                <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
-                  {profile?.full_name?.charAt(0)?.toUpperCase() ??
-                    profile?.email?.charAt(0)?.toUpperCase() ??
-                    "U"}
+                <AvatarFallback className="bg-[var(--accent-light)] text-sm font-medium text-[var(--accent)]">
+                  {userInitial}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white">
+                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                   {profile?.full_name ?? "User"}
                 </p>
-                <p className="truncate text-xs text-slate-400">
+                <p className="truncate text-xs text-[var(--text-tertiary)]">
                   {profile?.email ?? ""}
                 </p>
               </div>
@@ -244,14 +297,14 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               align="end"
               side="top"
               sideOffset={6}
-              className="min-w-56 bg-slate-900 text-slate-100 ring-slate-700"
+              className="min-w-56 border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-primary)]"
             >
               <DropdownMenuItem
                 render={
                   <Link
                     href="/settings?tab=profile"
                     onClick={onClose}
-                    className="text-slate-200 focus:bg-slate-800 focus:text-white"
+                    className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
                   />
                 }
               >
@@ -263,17 +316,17 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   <Link
                     href="/settings?tab=whatsapp"
                     onClick={onClose}
-                    className="text-slate-200 focus:bg-slate-800 focus:text-white"
+                    className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
                   />
                 }
               >
                 <Settings className="size-4" />
                 Settings
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-slate-800" />
+              <DropdownMenuSeparator className="bg-[var(--border)]" />
               <DropdownMenuItem
                 onClick={signOut}
-                className="text-slate-200 focus:bg-slate-800 focus:text-white"
+                className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
               >
                 <LogOut className="size-4" />
                 Sign out
