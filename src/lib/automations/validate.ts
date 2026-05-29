@@ -128,6 +128,15 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
             message: 'webhook URL must use http or https',
           })
         }
+        // n8n exposes temporary test endpoints under /webhook-test/*.
+        // They return 404 unless the editor is actively listening for
+        // test events. Automations need the production /webhook/* URL.
+        if (u.pathname.includes('/webhook-test/')) {
+          issues.push({
+            path: `${path}.url`,
+            message: 'use the n8n production webhook URL (/webhook/...), not /webhook-test/...',
+          })
+        }
       } catch {
         issues.push({ path: `${path}.url`, message: 'webhook URL is not a valid URL' })
       }

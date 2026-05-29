@@ -90,6 +90,18 @@ describe("validateStepsForActivation", () => {
     expect(garbage.map((i) => i.message)).toContain(
       "webhook URL is not a valid URL",
     );
+
+    const n8nTestUrl = validateStepsForActivation([
+      {
+        step_type: "send_webhook",
+        step_config: {
+          url: "https://n8n.example.com/webhook-test/abc123/webhook",
+        },
+      },
+    ]);
+    expect(n8nTestUrl.map((i) => i.message)).toContain(
+      "use the n8n production webhook URL (/webhook/...), not /webhook-test/...",
+    );
   });
 
   it("validates assign_conversation only when mode is 'specific'", () => {
