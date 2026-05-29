@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_N8N_INSTANCE_URL } from "@/lib/n8n-types";
+import {
+  getFallbackSettings,
+  isMissingN8nTableError,
+  upsertFallbackSettings,
+} from "@/lib/n8n-fallback-store";
 
 function normalizeInstanceUrl(value: string) {
   return value.replace(/\/+$/, "");
@@ -22,7 +27,7 @@ async function requireAuthenticatedClient() {
   } = await supabase.auth.getUser();
 
   if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase };
+  return { ok: true as const, supabase, user };
 }
 
 async function getExistingSettings(
@@ -66,13 +71,29 @@ export async function POST(request: Request) {
   };
 
   const existing = await getExistingSettings(guard.supabase);
+  let existingSettings = existing.data;
   if (existing.error) {
-    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    if (!isMissingN8nTableError(existing.error)) {
+      return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    }
+    try {
+      existingSettings = await getFallbackSettings(guard.supabase, guard.user.id);
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to load settings",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   const inputUrl = body.instance_url?.trim();
   const candidateUrl =
-    inputUrl || existing.data?.instance_url || DEFAULT_N8N_INSTANCE_URL;
+    inputUrl || existingSettings?.instance_url || DEFAULT_N8N_INSTANCE_URL;
   const instanceUrl = normalizeInstanceUrl(candidateUrl);
 
   if (!isValidUrl(instanceUrl)) {
@@ -89,7 +110,7 @@ export async function POST(request: Request) {
   try {
     const healthResult = await pingUrl(
       `${instanceUrl}/healthz`,
-      existing.data?.api_key,
+      existingSettings?.api_key,
     );
     statusCode = healthResult.status;
     connected = healthResult.ok || (statusCode > 0 && statusCode < 500);
@@ -97,7 +118,7 @@ export async function POST(request: Request) {
     if (!connected) {
       const workflowsResult = await pingUrl(
         `${instanceUrl}/api/v1/workflows`,
-        existing.data?.api_key,
+        existingSettings?.api_key,
       );
       statusCode = workflowsResult.status;
       connected =
@@ -119,22 +140,42 @@ export async function POST(request: Request) {
     updated_at: new Date().toISOString(),
   };
 
-  const persistResult = existing.data?.id
+  const persistResult = existingSettings?.id
     ? await guard.supabase
         .schema("public")
         .from("n8n_settings")
         .update(updateData)
-        .eq("id", existing.data.id)
+        .eq("id", existingSettings.id)
     : await guard.supabase
         .schema("public")
         .from("n8n_settings")
         .insert(updateData);
 
   if (persistResult.error) {
-    return NextResponse.json(
-      { error: persistResult.error.message },
-      { status: 500 },
-    );
+    if (!isMissingN8nTableError(persistResult.error)) {
+      return NextResponse.json(
+        { error: persistResult.error.message },
+        { status: 500 },
+      );
+    }
+    try {
+      await upsertFallbackSettings(guard.supabase, guard.user.id, {
+        instance_url: instanceUrl,
+        is_connected: connected,
+        last_ping_at: new Date().toISOString(),
+        last_ping_status: statusCode,
+      });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to persist connection status",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json(

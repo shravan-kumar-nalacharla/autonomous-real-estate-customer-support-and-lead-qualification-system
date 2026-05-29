@@ -2,6 +2,11 @@ import { createHmac } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type { N8nWorkflowRecord } from "@/lib/n8n-types";
+import {
+  getFallbackWorkflowById,
+  isMissingN8nTableError,
+  updateFallbackWorkflow,
+} from "@/lib/n8n-fallback-store";
 
 async function requireAuthenticatedClient() {
   const supabase = await createClient();
@@ -10,7 +15,7 @@ async function requireAuthenticatedClient() {
   } = await supabase.auth.getUser();
 
   if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase };
+  return { ok: true as const, supabase, user };
 }
 
 export async function POST(
@@ -31,11 +36,31 @@ export async function POST(
     .eq("id", id)
     .single();
 
-  if (error || !data) {
-    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-  }
+  let workflow: N8nWorkflowRecord | null = null;
 
-  const workflow = data as N8nWorkflowRecord;
+  if (error || !data) {
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    }
+    try {
+      workflow = await getFallbackWorkflowById(guard.supabase, guard.user.id, id);
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to load workflow",
+        },
+        { status: 500 },
+      );
+    }
+    if (!workflow) {
+      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    }
+  } else {
+    workflow = data as N8nWorkflowRecord;
+  }
   const payload = {
     event: workflow.trigger_event,
     test: true,
@@ -86,17 +111,28 @@ export async function POST(
     message = lastError;
   }
 
-  await guard.supabase
+  const updatePayload = {
+    last_triggered_at: new Date().toISOString(),
+    last_status_code: statusCode,
+    last_error: lastError,
+    execution_count: (workflow.execution_count ?? 0) + 1,
+    updated_at: new Date().toISOString(),
+  };
+
+  const updateResult = await guard.supabase
     .schema("public")
     .from("n8n_workflows")
-    .update({
-      last_triggered_at: new Date().toISOString(),
-      last_status_code: statusCode,
-      last_error: lastError,
-      execution_count: (workflow.execution_count ?? 0) + 1,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", workflow.id);
+
+  if (updateResult.error && isMissingN8nTableError(updateResult.error)) {
+    await updateFallbackWorkflow(
+      guard.supabase,
+      guard.user.id,
+      workflow.id,
+      updatePayload,
+    );
+  }
 
   return NextResponse.json(
     { success, status: statusCode, message },

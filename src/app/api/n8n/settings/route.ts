@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getFallbackSettings,
+  isMissingN8nTableError,
+  upsertFallbackSettings,
+} from "@/lib/n8n-fallback-store";
 
 function isValidUrl(value: string): boolean {
   try {
@@ -21,7 +26,7 @@ async function requireAuthenticatedClient() {
   } = await supabase.auth.getUser();
 
   if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase };
+  return { ok: true as const, supabase, user };
 }
 
 async function getExistingSettings(
@@ -46,7 +51,23 @@ export async function GET() {
   const { data, error } = await getExistingSettings(guard.supabase);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    try {
+      const settings = await getFallbackSettings(guard.supabase, guard.user.id);
+      return NextResponse.json({ settings: settings ?? null }, { status: 200 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to load settings",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ settings: data ?? null }, { status: 200 });
@@ -106,7 +127,45 @@ async function upsertSettings(request: Request) {
 
   const existing = await getExistingSettings(guard.supabase);
   if (existing.error) {
-    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    if (!isMissingN8nTableError(existing.error)) {
+      return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    }
+
+    try {
+      const settings = await upsertFallbackSettings(guard.supabase, guard.user.id, {
+        instance_url:
+          "instance_url" in body
+            ? (updateData.instance_url as string | null | undefined) ?? null
+            : undefined,
+        api_key:
+          "api_key" in body
+            ? (updateData.api_key as string | null | undefined) ?? null
+            : undefined,
+        is_connected:
+          "is_connected" in body
+            ? (updateData.is_connected as boolean | undefined) ?? false
+            : undefined,
+        last_ping_at:
+          "last_ping_at" in body
+            ? (updateData.last_ping_at as string | null | undefined) ?? null
+            : undefined,
+        last_ping_status:
+          "last_ping_status" in body
+            ? (updateData.last_ping_status as number | null | undefined) ?? null
+            : undefined,
+      });
+      return NextResponse.json({ settings }, { status: 200 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to update settings",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   if (existing.data?.id) {

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { N8N_TRIGGER_EVENTS, isN8nEvent } from "@/lib/n8n-types";
+import {
+  createFallbackWorkflow,
+  getFallbackWorkflows,
+  isMissingN8nTableError,
+} from "@/lib/n8n-fallback-store";
 
 function isValidUrl(value: string): boolean {
   try {
@@ -18,7 +23,7 @@ async function requireAuthenticatedClient() {
   } = await supabase.auth.getUser();
 
   if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase };
+  return { ok: true as const, supabase, user };
 }
 
 export async function GET() {
@@ -34,7 +39,23 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    try {
+      const workflows = await getFallbackWorkflows(guard.supabase, guard.user.id);
+      return NextResponse.json({ workflows }, { status: 200 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to load n8n workflows",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ workflows: data ?? [] }, { status: 200 });
@@ -106,10 +127,35 @@ export async function POST(request: Request) {
     .single();
 
   if (error || !data) {
-    return NextResponse.json(
-      { error: error?.message ?? "Failed to create workflow" },
-      { status: 500 },
-    );
+    if (!isMissingN8nTableError(error)) {
+      return NextResponse.json(
+        { error: error?.message ?? "Failed to create workflow" },
+        { status: 500 },
+      );
+    }
+    try {
+      const workflow = await createFallbackWorkflow(guard.supabase, guard.user.id, {
+        name,
+        description: body.description?.trim() || null,
+        workflow_id: body.workflow_id?.trim() || null,
+        webhook_url: webhookUrl,
+        trigger_event: triggerEvent,
+        is_active: body.is_active ?? true,
+        n8n_instance_url: body.n8n_instance_url?.trim() || null,
+        secret_token: body.secret_token?.trim() || null,
+      });
+      return NextResponse.json({ workflow }, { status: 201 });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        {
+          error:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : "Failed to create workflow",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   return NextResponse.json({ workflow: data }, { status: 201 });
