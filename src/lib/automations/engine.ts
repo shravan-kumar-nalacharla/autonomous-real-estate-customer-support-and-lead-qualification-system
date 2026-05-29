@@ -423,9 +423,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
     case 'send_webhook': {
       const cfg = step.step_config as SendWebhookStepConfig
       if (!cfg.url) throw new Error('send_webhook needs url')
-      const body = cfg.body_template
-        ? interpolate(cfg.body_template, args)
-        : JSON.stringify(await buildDefaultWebhookPayload(args))
+      const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
       const res = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
@@ -453,79 +451,6 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
-
-function normalizePhoneDigits(value: string | null | undefined): string {
-  return String(value ?? '').replace(/\D+/g, '')
-}
-
-async function resolveWebhookContact(args: ExecuteArgs): Promise<{
-  phone: string | null
-  name: string | null
-}> {
-  if (!args.contactId) return { phone: null, name: null }
-
-  const { data, error } = await supabaseAdmin()
-    .from('contacts')
-    .select('phone, name')
-    .eq('id', args.contactId)
-    .maybeSingle()
-
-  if (error) return { phone: null, name: null }
-
-  return {
-    phone: (data?.phone as string | null) ?? null,
-    name: (data?.name as string | null) ?? null,
-  }
-}
-
-async function buildDefaultWebhookPayload(args: ExecuteArgs): Promise<Record<string, unknown>> {
-  const contact = await resolveWebhookContact(args)
-  const customerPhone = normalizePhoneDigits(contact.phone)
-  const messageText = String(args.context.message_text ?? '')
-  const now = Date.now()
-
-  const message = {
-    id: `wacrm-${now}`,
-    from: customerPhone || '',
-    timestamp: String(Math.floor(now / 1000)),
-    type: 'text',
-    text: { body: messageText },
-  }
-
-  const contacts = customerPhone
-    ? [{ profile: { name: contact.name ?? '' }, wa_id: customerPhone }]
-    : []
-
-  const value = {
-    messaging_product: 'whatsapp',
-    metadata: {
-      display_phone_number: '',
-      phone_number_id: '',
-    },
-    contacts,
-    messages: [message],
-  }
-
-  return {
-    event: 'message.received',
-    source: 'huygen-warp-automation',
-    timestamp: new Date(now).toISOString(),
-    automation_id: args.automation.id,
-    user_id: args.automation.user_id,
-    contact_id: args.contactId,
-    conversation_id: args.context.conversation_id ?? null,
-    customer_phone: customerPhone || null,
-    customer_name: contact.name ?? null,
-    message_text: messageText,
-    context: args.context,
-    // Compatibility envelope for n8n workflows that parse Meta-like payloads.
-    entry: [{ id: 'wacrm', changes: [{ field: 'messages', value }] }],
-    value,
-    contacts,
-    messages: [message],
-    message,
-  }
-}
 
 /**
  * Pick the conversation a send-type step should use. Prefer the id the
