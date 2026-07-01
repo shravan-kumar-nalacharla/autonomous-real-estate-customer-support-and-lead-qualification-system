@@ -30,8 +30,8 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_WORKFLOW,
   type N8nEvent,
-  type N8nSettingsRecord,
-  type N8nWorkflowRecord,
+  type SafeN8nSettingsRecord,
+  type SafeN8nWorkflowRecord,
 } from "@/lib/n8n-types";
 
 const EVENT_OPTIONS: Array<{ label: string; value: N8nEvent }> = [
@@ -39,6 +39,12 @@ const EVENT_OPTIONS: Array<{ label: string; value: N8nEvent }> = [
   { label: "Message Sent", value: "message.sent" },
   { label: "Contact Created", value: "contact.created" },
   { label: "Contact Updated", value: "contact.updated" },
+  { label: "Lead Updated", value: "lead.requirements_updated" },
+  { label: "Lead Became Hot", value: "lead.hot" },
+  { label: "Property Recommended", value: "property.recommendation_created" },
+  { label: "Appointment Requested", value: "appointment.requested" },
+  { label: "Follow-up Created", value: "followup.created" },
+  { label: "Human Escalation", value: "human_escalation.created" },
   { label: "Deal Created", value: "deal.created" },
   { label: "Deal Stage Changed", value: "deal.stage_changed" },
   { label: "Broadcast Completed", value: "broadcast.completed" },
@@ -68,7 +74,7 @@ function truncateWebhook(url: string, max = 50) {
   return `${url.slice(0, max - 3)}...`;
 }
 
-function formatLastRun(workflow: N8nWorkflowRecord) {
+function formatLastRun(workflow: SafeN8nWorkflowRecord) {
   if (!workflow.last_triggered_at) return "Never run";
   const ago = formatDistanceToNow(new Date(workflow.last_triggered_at), {
     addSuffix: true,
@@ -99,8 +105,8 @@ function normalizeUrl(value: string) {
 
 export default function N8nWorkflowsPage() {
   const preseededRef = useRef(false);
-  const [workflows, setWorkflows] = useState<N8nWorkflowRecord[]>([]);
-  const [settings, setSettings] = useState<N8nSettingsRecord | null>(null);
+  const [workflows, setWorkflows] = useState<SafeN8nWorkflowRecord[]>([]);
+  const [settings, setSettings] = useState<SafeN8nSettingsRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -111,7 +117,7 @@ export default function N8nWorkflowsPage() {
   const [showPreloadedBanner, setShowPreloadedBanner] = useState(false);
 
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [editingWorkflow, setEditingWorkflow] = useState<N8nWorkflowRecord | null>(null);
+  const [editingWorkflow, setEditingWorkflow] = useState<SafeN8nWorkflowRecord | null>(null);
   const [formState, setFormState] = useState<WorkflowFormState>(DEFAULT_FORM_STATE);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -126,14 +132,14 @@ export default function N8nWorkflowsPage() {
   const fetchSettings = useCallback(async () => {
     const response = await fetch("/api/n8n/settings", { cache: "no-store" });
     if (!response.ok) return null;
-    const json = (await response.json()) as { settings?: N8nSettingsRecord | null };
+    const json = (await response.json()) as { settings?: SafeN8nSettingsRecord | null };
     return json.settings ?? null;
   }, []);
 
   const fetchWorkflows = useCallback(async () => {
     const response = await fetch("/api/n8n/workflows", { cache: "no-store" });
-    if (!response.ok) return [] as N8nWorkflowRecord[];
-    const json = (await response.json()) as { workflows?: N8nWorkflowRecord[] };
+    if (!response.ok) return [] as SafeN8nWorkflowRecord[];
+    const json = (await response.json()) as { workflows?: SafeN8nWorkflowRecord[] };
     return json.workflows ?? [];
   }, []);
 
@@ -154,7 +160,7 @@ export default function N8nWorkflowsPage() {
         });
         if (createSettingsResponse.ok) {
           const json = (await createSettingsResponse.json()) as {
-            settings?: N8nSettingsRecord;
+            settings?: SafeN8nSettingsRecord;
           };
           nextSettings = json.settings ?? null;
         }
@@ -176,7 +182,7 @@ export default function N8nWorkflowsPage() {
         });
         if (preseedResponse.ok) {
           const json = (await preseedResponse.json()) as {
-            workflow?: N8nWorkflowRecord;
+            workflow?: SafeN8nWorkflowRecord;
           };
           if (json.workflow) {
             nextWorkflows = [json.workflow];
@@ -208,14 +214,14 @@ export default function N8nWorkflowsPage() {
     setSheetOpen(true);
   }
 
-  function openEditModal(workflow: N8nWorkflowRecord) {
+  function openEditModal(workflow: SafeN8nWorkflowRecord) {
     setEditingWorkflow(workflow);
     setFormState({
       name: workflow.name,
       description: workflow.description ?? "",
       trigger_event: workflow.trigger_event,
-      webhook_url: workflow.webhook_url,
-      secret_token: workflow.secret_token ?? "",
+      webhook_url: "",
+      secret_token: "",
       is_active: workflow.is_active,
     });
     setShowSecret(false);
@@ -230,22 +236,24 @@ export default function N8nWorkflowsPage() {
       toast.error("Name is required");
       return;
     }
-    if (!isValidUrl(trimmedWebhook)) {
+    if (!editingWorkflow && !isValidUrl(trimmedWebhook)) {
       toast.error("Webhook URL must be valid");
       return;
     }
 
     setSavingWorkflow(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: trimmedName,
         description: formState.description.trim() || null,
         trigger_event: formState.trigger_event,
-        webhook_url: trimmedWebhook,
-        secret_token: formState.secret_token.trim() || null,
         is_active: formState.is_active,
         n8n_instance_url: normalizeUrl(urlDraft || DEFAULT_N8N_INSTANCE_URL),
       };
+      if (trimmedWebhook) payload.webhook_url = trimmedWebhook;
+      if (formState.secret_token.trim()) {
+        payload.secret_token = formState.secret_token.trim();
+      }
 
       const response = await fetch(
         editingWorkflow
@@ -266,7 +274,7 @@ export default function N8nWorkflowsPage() {
       }
 
       const json = (await response.json()) as {
-        workflow?: N8nWorkflowRecord;
+        workflow?: SafeN8nWorkflowRecord;
       };
       const savedWorkflow = json.workflow;
       if (savedWorkflow) {
@@ -309,7 +317,7 @@ export default function N8nWorkflowsPage() {
         body: JSON.stringify({ is_active: nextActive }),
       });
       if (!response.ok) throw new Error("Failed to update workflow");
-      const json = (await response.json()) as { workflow?: N8nWorkflowRecord };
+      const json = (await response.json()) as { workflow?: SafeN8nWorkflowRecord };
       if (json.workflow) {
         setWorkflows((prev) =>
           prev.map((workflow) =>
@@ -396,11 +404,11 @@ export default function N8nWorkflowsPage() {
         body: JSON.stringify({ instance_url: normalized }),
       });
       if (!response.ok) throw new Error();
-      const json = (await response.json()) as { settings?: N8nSettingsRecord };
+      const json = (await response.json()) as { settings?: SafeN8nSettingsRecord };
       setSettings((prev) =>
         json.settings
           ? { ...prev, ...json.settings }
-          : ({ ...prev, instance_url: normalized } as N8nSettingsRecord),
+          : ({ ...prev, instance_url: normalized } as SafeN8nSettingsRecord),
       );
       setUrlDraft(normalized);
       setEditingUrl(false);
@@ -430,7 +438,7 @@ export default function N8nWorkflowsPage() {
       setSettings((prev) => ({
         id: prev?.id ?? "temporary",
         instance_url: nextInstanceUrl,
-        api_key: prev?.api_key ?? null,
+        hasApiKeyConfigured: prev?.hasApiKeyConfigured ?? false,
         is_connected: connected,
         last_ping_at: new Date().toISOString(),
         last_ping_status: status,
@@ -654,18 +662,15 @@ export default function N8nWorkflowsPage() {
                           {workflow.trigger_event}
                         </span>
                       </div>
-                      <a
-                        href={workflow.webhook_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={workflow.webhook_url}
-                        className="mt-2 inline-flex max-w-full items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                      <span
+                        title={workflow.webhook_url_masked}
+                        className="mt-2 inline-flex max-w-full items-center gap-1 text-xs text-[var(--text-secondary)]"
                       >
                         <span className="truncate">
-                          {truncateWebhook(workflow.webhook_url)}
+                          {truncateWebhook(workflow.webhook_url_masked)}
                         </span>
                         <ExternalLink className="h-3 w-3 shrink-0" />
-                      </a>
+                      </span>
                       <p className="mt-3 flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
                         <span
                           className={`h-1.5 w-1.5 rounded-full ${getStatusDotClass(workflow.last_status_code)}`}

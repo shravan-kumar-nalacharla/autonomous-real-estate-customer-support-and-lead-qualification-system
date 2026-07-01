@@ -1,31 +1,15 @@
 import { createHmac } from "crypto";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOrganizationContext } from "@/lib/organizations";
 import type { N8nWorkflowRecord } from "@/lib/n8n-types";
-import {
-  getFallbackWorkflowById,
-  isMissingN8nTableError,
-  updateFallbackWorkflow,
-} from "@/lib/n8n-fallback-store";
-
-async function requireAuthenticatedClient() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase, user };
-}
+import { decrypt } from "@/lib/whatsapp/encryption";
 
 export async function POST(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const guard = await requireAuthenticatedClient();
-  if (!guard.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireOrganizationContext(["owner", "admin", "manager"]);
+  if (!guard.ok) return guard.response;
 
   const { id } = await context.params;
 
@@ -34,54 +18,39 @@ export async function POST(
     .from("n8n_workflows")
     .select("*")
     .eq("id", id)
-    .single();
+    .eq("organization_id", guard.organizationId)
+    .maybeSingle();
 
-  let workflow: N8nWorkflowRecord | null = null;
-
-  if (error || !data) {
-    if (!isMissingN8nTableError(error)) {
-      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-    }
-    try {
-      workflow = await getFallbackWorkflowById(guard.supabase, guard.user.id, id);
-    } catch (fallbackError) {
-      return NextResponse.json(
-        {
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : "Failed to load workflow",
-        },
-        { status: 500 },
-      );
-    }
-    if (!workflow) {
-      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-    }
-  } else {
-    workflow = data as N8nWorkflowRecord;
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  if (!data) {
+    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+  }
+
+  const workflow = data as N8nWorkflowRecord;
+  const timestamp = new Date().toISOString();
   const payload = {
+    organizationId: guard.organizationId,
     event: workflow.trigger_event,
     test: true,
     payload: {
-      contactId: "test-contact-123",
-      message: "Test ping from Huygen Warp",
-      customerPhone: "919999999999",
       source: "huygen-warp-test",
+      message: "Test ping from Huygen Warp",
     },
-    timestamp: new Date().toISOString(),
+    timestamp,
     source: "huygen-warp",
   };
+  const rawBody = JSON.stringify(payload);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-Huygen-Timestamp": timestamp,
   };
 
   if (workflow.secret_token) {
-    const signature = createHmac("sha256", workflow.secret_token)
-      .update(JSON.stringify(payload))
-      .digest("hex");
+    const secret = decrypt(workflow.secret_token);
+    const signature = createHmac("sha256", secret).update(rawBody).digest("hex");
     headers["X-Huygen-Signature"] = `sha256=${signature}`;
   }
 
@@ -94,7 +63,7 @@ export async function POST(
     const response = await fetch(workflow.webhook_url, {
       method: "POST",
       headers,
-      body: JSON.stringify(payload),
+      body: rawBody,
       signal: AbortSignal.timeout(10000),
     });
     statusCode = response.status;
@@ -104,35 +73,23 @@ export async function POST(
       : `n8n returned ${response.status}`;
     if (!response.ok) lastError = message;
   } catch (fetchError) {
-    statusCode = 0;
-    success = false;
     lastError =
       fetchError instanceof Error ? fetchError.message : "Unknown fetch error";
     message = lastError;
   }
 
-  const updatePayload = {
-    last_triggered_at: new Date().toISOString(),
-    last_status_code: statusCode,
-    last_error: lastError,
-    execution_count: (workflow.execution_count ?? 0) + 1,
-    updated_at: new Date().toISOString(),
-  };
-
-  const updateResult = await guard.supabase
+  await guard.supabase
     .schema("public")
     .from("n8n_workflows")
-    .update(updatePayload)
-    .eq("id", workflow.id);
-
-  if (updateResult.error && isMissingN8nTableError(updateResult.error)) {
-    await updateFallbackWorkflow(
-      guard.supabase,
-      guard.user.id,
-      workflow.id,
-      updatePayload,
-    );
-  }
+    .update({
+      last_triggered_at: new Date().toISOString(),
+      last_status_code: statusCode,
+      last_error: lastError,
+      execution_count: (workflow.execution_count ?? 0) + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", workflow.id)
+    .eq("organization_id", guard.organizationId);
 
   return NextResponse.json(
     { success, status: statusCode, message },

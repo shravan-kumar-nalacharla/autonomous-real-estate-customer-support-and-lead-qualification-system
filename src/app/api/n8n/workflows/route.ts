@@ -1,85 +1,63 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { N8N_TRIGGER_EVENTS, isN8nEvent } from "@/lib/n8n-types";
+import { requireOrganizationContext } from "@/lib/organizations";
 import {
-  createFallbackWorkflow,
-  getFallbackWorkflows,
-  isMissingN8nTableError,
-} from "@/lib/n8n-fallback-store";
+  N8N_TRIGGER_EVENTS,
+  isN8nEvent,
+  toSafeWorkflow,
+  type N8nWorkflowRecord,
+} from "@/lib/n8n-types";
+import { encrypt } from "@/lib/whatsapp/encryption";
 
 function isValidUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return Boolean(parsed.protocol && parsed.host);
+    return parsed.protocol === "https:" && Boolean(parsed.host);
   } catch {
     return false;
   }
 }
 
-async function requireAuthenticatedClient() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+type WorkflowBody = {
+  name?: string;
+  description?: string | null;
+  workflow_id?: string | null;
+  webhook_url?: string;
+  trigger_event?: string;
+  is_active?: boolean;
+  n8n_instance_url?: string | null;
+  secret_token?: string | null;
+};
 
-  if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase, user };
+function parseWorkflowBody(raw: unknown): WorkflowBody | null {
+  if (!raw || typeof raw !== "object") return null;
+  return raw as WorkflowBody;
 }
 
 export async function GET() {
-  const guard = await requireAuthenticatedClient();
-  if (!guard.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireOrganizationContext();
+  if (!guard.ok) return guard.response;
 
   const { data, error } = await guard.supabase
     .schema("public")
     .from("n8n_workflows")
     .select("*")
+    .eq("organization_id", guard.organizationId)
     .order("created_at", { ascending: false });
 
   if (error) {
-    if (!isMissingN8nTableError(error)) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    try {
-      const workflows = await getFallbackWorkflows(guard.supabase, guard.user.id);
-      return NextResponse.json({ workflows }, { status: 200 });
-    } catch (fallbackError) {
-      return NextResponse.json(
-        {
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : "Failed to load n8n workflows",
-        },
-        { status: 500 },
-      );
-    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ workflows: data ?? [] }, { status: 200 });
+  return NextResponse.json({
+    workflows: ((data ?? []) as N8nWorkflowRecord[]).map(toSafeWorkflow),
+  });
 }
 
 export async function POST(request: Request) {
-  const guard = await requireAuthenticatedClient();
-  if (!guard.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireOrganizationContext(["owner", "admin", "manager"]);
+  if (!guard.ok) return guard.response;
 
-  const body = (await request.json().catch(() => null)) as
-    | {
-        name?: string;
-        description?: string | null;
-        workflow_id?: string | null;
-        webhook_url?: string;
-        trigger_event?: string;
-        is_active?: boolean;
-        n8n_instance_url?: string | null;
-        secret_token?: string | null;
-      }
-    | null;
-
+  const body = parseWorkflowBody(await request.json().catch(() => null));
   if (!body) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -91,20 +69,15 @@ export async function POST(request: Request) {
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
-
   if (!webhookUrl || !isValidUrl(webhookUrl)) {
     return NextResponse.json(
-      { error: "webhook_url must be a valid URL" },
+      { error: "webhook_url must be a valid HTTPS URL" },
       { status: 400 },
     );
   }
-
   if (!isN8nEvent(triggerEvent)) {
     return NextResponse.json(
-      {
-        error: "trigger_event is invalid",
-        allowed: N8N_TRIGGER_EVENTS,
-      },
+      { error: "trigger_event is invalid", allowed: N8N_TRIGGER_EVENTS },
       { status: 400 },
     );
   }
@@ -113,6 +86,7 @@ export async function POST(request: Request) {
     .schema("public")
     .from("n8n_workflows")
     .insert({
+      organization_id: guard.organizationId,
       name,
       description: body.description?.trim() || null,
       workflow_id: body.workflow_id?.trim() || null,
@@ -120,43 +94,23 @@ export async function POST(request: Request) {
       trigger_event: triggerEvent,
       is_active: body.is_active ?? true,
       n8n_instance_url: body.n8n_instance_url?.trim() || null,
-      secret_token: body.secret_token?.trim() || null,
+      secret_token: body.secret_token?.trim()
+        ? encrypt(body.secret_token.trim())
+        : null,
       updated_at: new Date().toISOString(),
     })
     .select("*")
     .single();
 
   if (error || !data) {
-    if (!isMissingN8nTableError(error)) {
-      return NextResponse.json(
-        { error: error?.message ?? "Failed to create workflow" },
-        { status: 500 },
-      );
-    }
-    try {
-      const workflow = await createFallbackWorkflow(guard.supabase, guard.user.id, {
-        name,
-        description: body.description?.trim() || null,
-        workflow_id: body.workflow_id?.trim() || null,
-        webhook_url: webhookUrl,
-        trigger_event: triggerEvent,
-        is_active: body.is_active ?? true,
-        n8n_instance_url: body.n8n_instance_url?.trim() || null,
-        secret_token: body.secret_token?.trim() || null,
-      });
-      return NextResponse.json({ workflow }, { status: 201 });
-    } catch (fallbackError) {
-      return NextResponse.json(
-        {
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : "Failed to create workflow",
-        },
-        { status: 500 },
-      );
-    }
+    return NextResponse.json(
+      { error: error?.message ?? "Failed to create workflow" },
+      { status: 500 },
+    );
   }
 
-  return NextResponse.json({ workflow: data }, { status: 201 });
+  return NextResponse.json(
+    { workflow: toSafeWorkflow(data as N8nWorkflowRecord) },
+    { status: 201 },
+  );
 }

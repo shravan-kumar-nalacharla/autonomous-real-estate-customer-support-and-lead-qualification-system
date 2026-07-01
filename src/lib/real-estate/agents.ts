@@ -1,0 +1,681 @@
+import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { dispatchN8nEvent } from "@/lib/n8n-dispatcher";
+import { scoreLead } from "./lead-scoring";
+import { findPropertyMatches } from "./property-matching";
+import type {
+  AgentActivityInput,
+  AgentInput,
+  ParsedLeadRequirements,
+  RealEstateIntent,
+} from "./types";
+
+export async function runRealEstateAgents(input: AgentInput): Promise<void> {
+  const db = supabaseAdmin();
+  const idempotencyBase = `meta:${input.metaMessageId}`;
+
+  const { data: existingActivity } = await db
+    .from("agent_activity_logs")
+    .select("id")
+    .eq("organization_id", input.organizationId)
+    .eq("idempotency_key", `${idempotencyBase}:orchestrator`)
+    .maybeSingle();
+  if (existingActivity) return;
+
+  const { data: conversation } = await db
+    .from("conversations")
+    .select("automation_mode, assigned_agent_id")
+    .eq("id", input.conversationId)
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+
+  if (
+    conversation?.automation_mode === "human" ||
+    conversation?.assigned_agent_id
+  ) {
+    await logActivity({
+      ...baseActivity(input, "orchestrator", `${idempotencyBase}:orchestrator`),
+      actionType: "skipped_human_owned_conversation",
+      inputSummary: summarize(input.text),
+      outputSummary: "Automated real-estate agents skipped.",
+      reason: "Conversation is already assigned to a human or automation is paused.",
+      confidence: 1,
+    });
+    return;
+  }
+
+  const intent = classifyIntent(input.text);
+  await logActivity({
+    ...baseActivity(input, "orchestrator", `${idempotencyBase}:orchestrator`),
+    actionType: "intent_routed",
+    inputSummary: summarize(input.text),
+    outputSummary: `Intent: ${intent}`,
+    reason: "Keyword and phrase based deterministic routing.",
+    confidence: intent === "unknown" ? 0.35 : 0.8,
+  });
+
+  await dispatchN8nEvent({
+    organizationId: input.organizationId,
+    event: "message.received",
+    entityType: "message",
+    entityId: input.messageId,
+    idempotencyKey: `${idempotencyBase}:message.received`,
+    payload: {
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      customerPhone: input.customerPhone,
+      customerName: input.customerName,
+      intent,
+      messageSummary: summarize(input.text),
+    },
+  });
+
+  const parsed = parseRequirements(input.text, intent);
+  const hasRequirementUpdate = hasRequirementSignal(parsed);
+  if (hasRequirementUpdate) {
+    await updateLeadQualification(input, parsed, idempotencyBase);
+  }
+
+  if (intent === "property_search" || hasRequirementUpdate) {
+    await recommendProperties(input, idempotencyBase);
+  }
+
+  if (intent === "appointment_request") {
+    await createAppointmentRequest(input, idempotencyBase);
+  } else if (intent === "appointment_change") {
+    await createFollowUpTask(
+      input,
+      "appointment_change_requested",
+      `${idempotencyBase}:appointment_change_followup`,
+    );
+  }
+
+  if (
+    intent === "human_support" ||
+    intent === "complaint_or_sensitive" ||
+    intent === "unknown"
+  ) {
+    await createHumanHandoff(input, intent, idempotencyBase);
+  }
+
+  if (intent === "general_enquiry" && !hasRequirementUpdate) {
+    await createFollowUpTask(
+      input,
+      "incomplete_qualification",
+      `${idempotencyBase}:incomplete_qualification_followup`,
+    );
+  }
+}
+
+async function updateLeadQualification(
+  input: AgentInput,
+  parsed: ParsedLeadRequirements,
+  idempotencyBase: string,
+) {
+  const db = supabaseAdmin();
+  const { data: current } = await db
+    .from("lead_requirements")
+    .select("*")
+    .eq("organization_id", input.organizationId)
+    .eq("contact_id", input.contactId)
+    .maybeSingle();
+
+  const merged = mergeRequirements(current as ParsedLeadRequirements | null, parsed);
+
+  const { data: requirement, error } = await db
+    .from("lead_requirements")
+    .upsert(
+      {
+        organization_id: input.organizationId,
+        contact_id: input.contactId,
+        conversation_id: input.conversationId,
+        ...merged,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "organization_id,contact_id" },
+    )
+    .select("*")
+    .single();
+
+  if (error || !requirement) {
+    console.error("[qualification] requirement upsert failed:", error?.message);
+    return;
+  }
+
+  const previousCategory = await getLeadCategory(input.organizationId, input.contactId);
+  const score = scoreLead({
+    ...merged,
+    hasVerifiedContact: Boolean(input.customerPhone),
+  });
+
+  const { data: scoreRow } = await db
+    .from("lead_scores")
+    .upsert(
+      {
+        organization_id: input.organizationId,
+        contact_id: input.contactId,
+        conversation_id: input.conversationId,
+        requirement_id: requirement.id,
+        score: score.score,
+        category: score.category,
+        breakdown: score.breakdown,
+        explanation: score.explanation,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "organization_id,contact_id" },
+    )
+    .select("*")
+    .single();
+
+  await logActivity({
+    ...baseActivity(input, "qualification", `${idempotencyBase}:qualification`),
+    actionType: "lead_requirements_updated",
+    inputSummary: summarize(input.text),
+    outputSummary: `Lead scored ${score.score}/100 as ${score.category}.`,
+    reason: score.explanation,
+    confidence: 0.82,
+    relatedEntityIds: {
+      requirementId: requirement.id,
+      scoreId: scoreRow?.id,
+    },
+  });
+
+  await dispatchN8nEvent({
+    organizationId: input.organizationId,
+    event: "lead.requirements_updated",
+    entityType: "lead_requirements",
+    entityId: requirement.id,
+    idempotencyKey: `${idempotencyBase}:lead.requirements_updated`,
+    payload: {
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      score: score.score,
+      category: score.category,
+      explanation: score.explanation,
+    },
+  });
+
+  if (previousCategory && previousCategory !== score.category) {
+    await dispatchN8nEvent({
+      organizationId: input.organizationId,
+      event: "lead.category_changed",
+      entityType: "lead_scores",
+      entityId: scoreRow?.id ?? input.contactId,
+      idempotencyKey: `${idempotencyBase}:lead.category_changed:${score.category}`,
+      payload: {
+        contactId: input.contactId,
+        previousCategory,
+        category: score.category,
+        score: score.score,
+      },
+    });
+  }
+
+  if (score.category === "hot") {
+    await dispatchN8nEvent({
+      organizationId: input.organizationId,
+      event: "lead.hot",
+      entityType: "lead_scores",
+      entityId: scoreRow?.id ?? input.contactId,
+      idempotencyKey: `${idempotencyBase}:lead.hot`,
+      payload: {
+        contactId: input.contactId,
+        conversationId: input.conversationId,
+        score: score.score,
+        explanation: score.explanation,
+      },
+    });
+    await createHumanHandoff(input, "hot_lead", idempotencyBase);
+  }
+}
+
+async function recommendProperties(input: AgentInput, idempotencyBase: string) {
+  const db = supabaseAdmin();
+  const { data: requirements } = await db
+    .from("lead_requirements")
+    .select("*")
+    .eq("organization_id", input.organizationId)
+    .eq("contact_id", input.contactId)
+    .maybeSingle();
+  if (!requirements) return;
+
+  const matches = await findPropertyMatches({
+    db,
+    organizationId: input.organizationId,
+    requirements: requirements as ParsedLeadRequirements,
+  });
+  if (matches.length === 0) return;
+
+  for (const match of matches) {
+    const { data } = await db
+      .from("property_recommendations")
+      .upsert(
+        {
+          organization_id: input.organizationId,
+          contact_id: input.contactId,
+          conversation_id: input.conversationId,
+          property_id: match.property_id,
+          match_score: match.match_score,
+          matching_reasons: match.matching_reasons,
+        },
+        { onConflict: "organization_id,contact_id,property_id" },
+      )
+      .select("id")
+      .maybeSingle();
+
+    await dispatchN8nEvent({
+      organizationId: input.organizationId,
+      event: "property.recommendation_created",
+      entityType: "property_recommendations",
+      entityId: data?.id ?? match.property_id,
+      idempotencyKey: `${idempotencyBase}:property.recommendation:${match.property_id}`,
+      payload: {
+        contactId: input.contactId,
+        conversationId: input.conversationId,
+        propertyId: match.property_id,
+        matchScore: match.match_score,
+        reasons: match.matching_reasons,
+      },
+    });
+  }
+
+  await logActivity({
+    ...baseActivity(input, "property_matching", `${idempotencyBase}:property_matching`),
+    actionType: "properties_recommended",
+    inputSummary: summarize(input.text),
+    outputSummary: `${matches.length} available properties matched.`,
+    reason: matches.flatMap((match) => match.matching_reasons).join("; "),
+    confidence: 0.75,
+  });
+}
+
+async function createAppointmentRequest(input: AgentInput, idempotencyBase: string) {
+  const db = supabaseAdmin();
+  const { data: latestRecommendation } = await db
+    .from("property_recommendations")
+    .select("property_id")
+    .eq("organization_id", input.organizationId)
+    .eq("contact_id", input.contactId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: appointment, error } = await db
+    .from("appointments")
+    .insert({
+      organization_id: input.organizationId,
+      contact_id: input.contactId,
+      conversation_id: input.conversationId,
+      property_id: latestRecommendation?.property_id ?? null,
+      status: "requested",
+      notes: "Customer requested a site visit on WhatsApp. Human confirmation required.",
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    await logActivity({
+      ...baseActivity(input, "appointment", `${idempotencyBase}:appointment_duplicate`),
+      actionType: "appointment_request_not_created",
+      inputSummary: summarize(input.text),
+      outputSummary: "Existing active appointment likely already exists.",
+      reason: error.message,
+      confidence: 0.7,
+    });
+    return;
+  }
+
+  await createFollowUpTask(
+    input,
+    "appointment_confirmation_required",
+    `${idempotencyBase}:appointment_confirmation_task`,
+  );
+
+  await logActivity({
+    ...baseActivity(input, "appointment", `${idempotencyBase}:appointment`),
+    actionType: "appointment_requested",
+    inputSummary: summarize(input.text),
+    outputSummary: "Created a requested appointment pending human confirmation.",
+    reason: "Customer asked for visit, schedule, appointment, or site visit.",
+    confidence: 0.84,
+    relatedEntityIds: { appointmentId: appointment?.id },
+  });
+
+  await dispatchN8nEvent({
+    organizationId: input.organizationId,
+    event: "appointment.requested",
+    entityType: "appointments",
+    entityId: appointment?.id ?? input.contactId,
+    idempotencyKey: `${idempotencyBase}:appointment.requested`,
+    payload: {
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      appointmentId: appointment?.id,
+    },
+  });
+}
+
+async function createFollowUpTask(
+  input: AgentInput,
+  reason: string,
+  idempotencyKey: string,
+) {
+  const db = supabaseAdmin();
+  const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await db
+    .from("follow_up_tasks")
+    .upsert(
+      {
+        organization_id: input.organizationId,
+        contact_id: input.contactId,
+        conversation_id: input.conversationId,
+        reason,
+        due_at: dueAt,
+        status: "pending",
+      },
+      { onConflict: "organization_id,contact_id,reason", ignoreDuplicates: true },
+    )
+    .select("id")
+    .maybeSingle();
+
+  await logActivity({
+    ...baseActivity(input, "followup", idempotencyKey),
+    actionType: "followup_task_created",
+    inputSummary: summarize(input.text),
+    outputSummary: `Follow-up task: ${reason}.`,
+    reason: "Deterministic follow-up rule.",
+    confidence: 0.72,
+    relatedEntityIds: { followUpTaskId: data?.id },
+  });
+
+  await dispatchN8nEvent({
+    organizationId: input.organizationId,
+    event: "followup.created",
+    entityType: "follow_up_tasks",
+    entityId: data?.id ?? input.contactId,
+    idempotencyKey: `${idempotencyKey}:event`,
+    payload: {
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      reason,
+      dueAt,
+    },
+  });
+}
+
+async function createHumanHandoff(
+  input: AgentInput,
+  reason: string,
+  idempotencyBase: string,
+) {
+  const db = supabaseAdmin();
+  const assignedAgentId = await leastLoadedAgent(input.organizationId);
+  const { data: handoff } = await db
+    .from("human_handoffs")
+    .insert({
+      organization_id: input.organizationId,
+      contact_id: input.contactId,
+      conversation_id: input.conversationId,
+      assigned_agent_id: assignedAgentId,
+      reason,
+      status: "open",
+    })
+    .select("id")
+    .maybeSingle();
+
+  await db
+    .from("conversations")
+    .update({
+      automation_mode: "human",
+      status: "pending",
+      assigned_agent_id: assignedAgentId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.conversationId)
+    .eq("organization_id", input.organizationId);
+
+  await logActivity({
+    ...baseActivity(input, "escalation", `${idempotencyBase}:handoff:${reason}`),
+    actionType: "human_handoff_created",
+    inputSummary: summarize(input.text),
+    outputSummary: assignedAgentId
+      ? "Conversation handed off to a sales agent."
+      : "Conversation handed off for manual assignment.",
+    reason,
+    confidence: 0.86,
+    relatedEntityIds: { handoffId: handoff?.id, assignedAgentId },
+  });
+
+  await dispatchN8nEvent({
+    organizationId: input.organizationId,
+    event: "human_escalation.created",
+    entityType: "human_handoffs",
+    entityId: handoff?.id ?? input.conversationId,
+    idempotencyKey: `${idempotencyBase}:human_escalation.created:${reason}`,
+    payload: {
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      reason,
+      assignedAgentId,
+    },
+  });
+}
+
+async function leastLoadedAgent(organizationId: string): Promise<string | null> {
+  const db = supabaseAdmin();
+  const { data: members } = await db
+    .from("organization_members")
+    .select("user_id, role")
+    .eq("organization_id", organizationId)
+    .eq("status", "active")
+    .in("role", ["agent", "manager", "admin", "owner"]);
+  if (!members?.length) return null;
+
+  const candidates = (members as Array<{ user_id: string; role: string }>).map(
+    (member) => member.user_id,
+  );
+  const { data: conversations } = await db
+    .from("conversations")
+    .select("assigned_agent_id")
+    .eq("organization_id", organizationId)
+    .in("assigned_agent_id", candidates);
+  const load = new Map(candidates.map((id) => [id, 0]));
+  for (const row of (conversations ?? []) as Array<{ assigned_agent_id: string | null }>) {
+    if (row.assigned_agent_id) {
+      load.set(row.assigned_agent_id, (load.get(row.assigned_agent_id) ?? 0) + 1);
+    }
+  }
+  return [...load.entries()].sort((a, b) => a[1] - b[1])[0]?.[0] ?? null;
+}
+
+async function getLeadCategory(organizationId: string, contactId: string) {
+  const { data } = await supabaseAdmin()
+    .from("lead_scores")
+    .select("category")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contactId)
+    .maybeSingle();
+  return (data as { category?: string } | null)?.category ?? null;
+}
+
+async function logActivity(input: AgentActivityInput) {
+  const { error } = await supabaseAdmin().from("agent_activity_logs").upsert(
+    {
+      organization_id: input.organizationId,
+      contact_id: input.contactId,
+      conversation_id: input.conversationId,
+      agent_type: input.agentType,
+      action_type: input.actionType,
+      input_summary: input.inputSummary,
+      output_summary: input.outputSummary,
+      reason: input.reason,
+      confidence: input.confidence,
+      related_entity_ids: input.relatedEntityIds ?? {},
+      idempotency_key: input.idempotencyKey,
+    },
+    { onConflict: "organization_id,idempotency_key", ignoreDuplicates: true },
+  );
+  if (error) console.error("[agent_activity] log failed:", error.message);
+}
+
+function baseActivity(
+  input: AgentInput,
+  agentType: AgentActivityInput["agentType"],
+  idempotencyKey: string,
+) {
+  return {
+    organizationId: input.organizationId,
+    contactId: input.contactId,
+    conversationId: input.conversationId,
+    agentType,
+    idempotencyKey,
+  };
+}
+
+export function classifyIntent(text: string): RealEstateIntent {
+  const lower = text.toLowerCase();
+  if (/\b(stop|unsubscribe|opt out)\b/.test(lower)) return "human_support";
+  if (/\b(complaint|angry|fraud|legal|lawyer|loan approval|negotiate|urgent)\b/.test(lower)) {
+    return "complaint_or_sensitive";
+  }
+  if (/\b(human|agent|salesperson|call me|talk to)\b/.test(lower)) {
+    return "human_support";
+  }
+  if (/\b(reschedule|cancel|change.*visit|change.*appointment)\b/.test(lower)) {
+    return "appointment_change";
+  }
+  if (/\b(visit|site visit|appointment|schedule|book|meet)\b/.test(lower)) {
+    return "appointment_request";
+  }
+  if (/\b(budget|bhk|bedroom|flat|villa|plot|rent|buy|purchase|location|near|looking for)\b/.test(lower)) {
+    return "property_search";
+  }
+  if (/\b(price|area|amenities|available|availability)\b/.test(lower)) {
+    return "property_question";
+  }
+  if (lower.trim().length < 8) return "unknown";
+  return "general_enquiry";
+}
+
+export function parseRequirements(
+  text: string,
+  intent: RealEstateIntent,
+): ParsedLeadRequirements {
+  const lower = text.toLowerCase();
+  const bedrooms = lower.match(/\b([1-6])\s*(bhk|bed(room)?s?)\b/);
+  const budget = parseBudget(lower);
+  const locations = parseLocations(text);
+  const propertyType = parsePropertyType(lower);
+  const listingType = /\b(rent|rental|lease)\b/.test(lower)
+    ? "rent"
+    : /\b(buy|purchase|sale)\b/.test(lower)
+      ? "sale"
+      : null;
+  const timeline = parseTimeline(lower);
+
+  return {
+    preferred_locations: locations.length ? locations : undefined,
+    budget_min: budget.min,
+    budget_max: budget.max,
+    property_type: propertyType,
+    bedroom_count: bedrooms ? Number(bedrooms[1]) : null,
+    listing_type: listingType,
+    timeline,
+    financing_interest: /\b(loan|finance|emi|mortgage)\b/.test(lower) || null,
+    site_visit_interest:
+      intent === "appointment_request" || /\b(site visit|visit|schedule)\b/.test(lower),
+  };
+}
+
+function mergeRequirements(
+  current: ParsedLeadRequirements | null,
+  next: ParsedLeadRequirements,
+): ParsedLeadRequirements {
+  return {
+    preferred_locations:
+      next.preferred_locations?.length
+        ? unique([...(current?.preferred_locations ?? []), ...next.preferred_locations])
+        : current?.preferred_locations ?? [],
+    budget_min: next.budget_min ?? current?.budget_min ?? null,
+    budget_max: next.budget_max ?? current?.budget_max ?? null,
+    property_type: next.property_type ?? current?.property_type ?? null,
+    bedroom_count: next.bedroom_count ?? current?.bedroom_count ?? null,
+    listing_type: next.listing_type ?? current?.listing_type ?? null,
+    timeline: next.timeline ?? current?.timeline ?? null,
+    financing_interest:
+      next.financing_interest ?? current?.financing_interest ?? null,
+    site_visit_interest:
+      next.site_visit_interest ?? current?.site_visit_interest ?? false,
+  };
+}
+
+function hasRequirementSignal(parsed: ParsedLeadRequirements): boolean {
+  return Boolean(
+    parsed.preferred_locations?.length ||
+      parsed.budget_min != null ||
+      parsed.budget_max != null ||
+      parsed.property_type ||
+      parsed.bedroom_count ||
+      parsed.listing_type ||
+      parsed.timeline ||
+      parsed.financing_interest ||
+      parsed.site_visit_interest,
+  );
+}
+
+function parseBudget(text: string): { min: number | null; max: number | null } {
+  const range = text.match(/(\d+(?:\.\d+)?)\s*(lakh|lac|cr|crore|k)?\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*(lakh|lac|cr|crore|k)?/);
+  if (range) {
+    return {
+      min: moneyToNumber(range[1], range[2]),
+      max: moneyToNumber(range[3], range[4] || range[2]),
+    };
+  }
+  const single = text.match(/(?:budget|under|below|upto|up to|around)\s*(\d+(?:\.\d+)?)\s*(lakh|lac|cr|crore|k)?/);
+  if (single) return { min: null, max: moneyToNumber(single[1], single[2]) };
+  return { min: null, max: null };
+}
+
+function moneyToNumber(value: string, unit?: string): number {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return 0;
+  if (unit === "cr" || unit === "crore") return raw * 10_000_000;
+  if (unit === "lakh" || unit === "lac") return raw * 100_000;
+  if (unit === "k") return raw * 1_000;
+  return raw;
+}
+
+function parseLocations(text: string): string[] {
+  const match = text.match(/\b(?:in|near|around)\s+([A-Za-z][A-Za-z\s-]{2,40})/);
+  if (!match) return [];
+  return [
+    match[1]
+      .replace(/\b(under|below|budget|with|this month|this week|within|for)\b.*$/i, "")
+      .replace(/[?.!,].*$/, "")
+      .trim(),
+  ].filter(Boolean);
+}
+
+function parsePropertyType(text: string): string | null {
+  if (/\bvilla\b/.test(text)) return "villa";
+  if (/\bplot\b/.test(text)) return "plot";
+  if (/\b(apartment|flat)\b/.test(text)) return "apartment";
+  if (/\boffice|commercial\b/.test(text)) return "commercial";
+  return null;
+}
+
+function parseTimeline(text: string): string | null {
+  if (/\b(immediate|asap|urgent|this week)\b/.test(text)) return "immediate";
+  if (/\b(this month|30 days|1 month)\b/.test(text)) return "within_1_month";
+  if (/\b(3 months|quarter)\b/.test(text)) return "within_3_months";
+  if (/\b(6 months|later)\b/.test(text)) return "within_6_months";
+  return null;
+}
+
+function summarize(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= 180 ? clean : `${clean.slice(0, 177)}...`;
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}

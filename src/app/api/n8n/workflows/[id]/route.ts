@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { N8N_TRIGGER_EVENTS, isN8nEvent } from "@/lib/n8n-types";
+import { requireOrganizationContext } from "@/lib/organizations";
 import {
-  deleteFallbackWorkflow,
-  getFallbackWorkflowById,
-  isMissingN8nTableError,
-  updateFallbackWorkflow,
-} from "@/lib/n8n-fallback-store";
+  N8N_TRIGGER_EVENTS,
+  isN8nEvent,
+  toSafeWorkflow,
+  type N8nWorkflowRecord,
+} from "@/lib/n8n-types";
+import { encrypt } from "@/lib/whatsapp/encryption";
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "name",
@@ -22,78 +22,42 @@ const ALLOWED_PATCH_FIELDS = new Set([
 function isValidUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return Boolean(parsed.protocol && parsed.host);
+    return parsed.protocol === "https:" && Boolean(parsed.host);
   } catch {
     return false;
   }
 }
 
-async function requireAuthenticatedClient() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+type RouteContext = { params: Promise<{ id: string }> };
 
-  if (!user) return { ok: false as const, supabase };
-  return { ok: true as const, supabase, user };
-}
-
-export async function GET(
-  _request: Request,
-  context: { params: Promise<{ id: string }> },
-) {
-  const guard = await requireAuthenticatedClient();
-  if (!guard.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function GET(_request: Request, context: RouteContext) {
+  const guard = await requireOrganizationContext();
+  if (!guard.ok) return guard.response;
 
   const { id } = await context.params;
-
   const { data, error } = await guard.supabase
     .schema("public")
     .from("n8n_workflows")
     .select("*")
     .eq("id", id)
-    .single();
+    .eq("organization_id", guard.organizationId)
+    .maybeSingle();
 
-  if (error || !data) {
-    if (!isMissingN8nTableError(error)) {
-      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-    }
-    try {
-      const workflow = await getFallbackWorkflowById(
-        guard.supabase,
-        guard.user.id,
-        id,
-      );
-      if (!workflow) {
-        return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-      }
-      return NextResponse.json({ workflow }, { status: 200 });
-    } catch (fallbackError) {
-      return NextResponse.json(
-        {
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : "Failed to load workflow",
-        },
-        { status: 500 },
-      );
-    }
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ workflow: data }, { status: 200 });
+  return NextResponse.json({
+    workflow: toSafeWorkflow(data as N8nWorkflowRecord),
+  });
 }
 
-export async function PATCH(
-  request: Request,
-  context: { params: Promise<{ id: string }> },
-) {
-  const guard = await requireAuthenticatedClient();
-  if (!guard.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function PATCH(request: Request, context: RouteContext) {
+  const guard = await requireOrganizationContext(["owner", "admin", "manager"]);
+  if (!guard.ok) return guard.response;
 
   const { id } = await context.params;
   const body = (await request.json().catch(() => null)) as
@@ -122,7 +86,7 @@ export async function PATCH(
       const webhookUrl = String(value ?? "").trim();
       if (!isValidUrl(webhookUrl)) {
         return NextResponse.json(
-          { error: "webhook_url must be a valid URL" },
+          { error: "webhook_url must be a valid HTTPS URL" },
           { status: 400 },
         );
       }
@@ -147,7 +111,13 @@ export async function PATCH(
       continue;
     }
 
-    if (key === "description" || key === "secret_token" || key === "workflow_id" || key === "n8n_instance_url") {
+    if (key === "secret_token") {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      updateData.secret_token = trimmed ? encrypt(trimmed) : null;
+      continue;
+    }
+
+    if (key === "description" || key === "workflow_id" || key === "n8n_instance_url") {
       const trimmed = typeof value === "string" ? value.trim() : "";
       updateData[key] = trimmed || null;
     }
@@ -167,83 +137,42 @@ export async function PATCH(
     .from("n8n_workflows")
     .update(updateData)
     .eq("id", id)
+    .eq("organization_id", guard.organizationId)
     .select("*")
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    if (!isMissingN8nTableError(error)) {
-      return NextResponse.json(
-        { error: error?.message ?? "Workflow not found" },
-        { status: 404 },
-      );
-    }
-
-    try {
-      const workflow = await updateFallbackWorkflow(
-        guard.supabase,
-        guard.user.id,
-        id,
-        updateData,
-      );
-      if (!workflow) {
-        return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-      }
-      return NextResponse.json({ workflow }, { status: 200 });
-    } catch (fallbackError) {
-      return NextResponse.json(
-        {
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : "Failed to update workflow",
-        },
-        { status: 500 },
-      );
-    }
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ workflow: data }, { status: 200 });
+  return NextResponse.json({
+    workflow: toSafeWorkflow(data as N8nWorkflowRecord),
+  });
 }
 
-export async function DELETE(
-  _request: Request,
-  context: { params: Promise<{ id: string }> },
-) {
-  const guard = await requireAuthenticatedClient();
-  if (!guard.ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function DELETE(_request: Request, context: RouteContext) {
+  const guard = await requireOrganizationContext(["owner", "admin", "manager"]);
+  if (!guard.ok) return guard.response;
 
   const { id } = await context.params;
-
-  const { error } = await guard.supabase
+  const { data, error } = await guard.supabase
     .schema("public")
     .from("n8n_workflows")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("organization_id", guard.organizationId)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
-    if (!isMissingN8nTableError(error)) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    try {
-      const deleted = await deleteFallbackWorkflow(guard.supabase, guard.user.id, id);
-      if (!deleted) {
-        return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
-      }
-      return NextResponse.json({ success: true }, { status: 200 });
-    } catch (fallbackError) {
-      return NextResponse.json(
-        {
-          error:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : "Failed to delete workflow",
-        },
-        { status: 500 },
-      );
-    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true }, { status: 200 });
+  return NextResponse.json({ success: true });
 }

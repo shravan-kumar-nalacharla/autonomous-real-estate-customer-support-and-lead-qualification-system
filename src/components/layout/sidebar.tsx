@@ -9,6 +9,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import {
   BarChart3,
+  Building2,
+  CalendarClock,
   GitBranch,
   LogOut,
   MessageSquare,
@@ -39,6 +41,8 @@ interface NavItem {
 const mainNavItems: NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: MessageSquare },
   { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/properties", label: "Properties", icon: Building2 },
+  { href: "/appointments", label: "Appointments", icon: CalendarClock },
   { href: "/pipelines", label: "Pipeline", icon: GitBranch },
   { href: "/broadcasts", label: "Broadcasts", icon: Radio },
   { href: "/automations", label: "Automations", icon: Workflow },

@@ -7,6 +7,8 @@ import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { dispatchN8nEvent } from '@/lib/n8n-dispatcher'
+import { runRealEstateAgents } from '@/lib/real-estate/agents'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -283,6 +285,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       }
 
       const config = configRows[0]
+      const organizationId = config.organization_id ?? config.user_id
 
       const decryptedAccessToken = decrypt(config.access_token)
 
@@ -294,6 +297,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           message,
           contact,
           config.user_id,
+          organizationId,
           decryptedAccessToken
         )
       }
@@ -518,6 +522,7 @@ async function processMessage(
   message: WhatsAppMessage,
   contact: { profile: { name: string }; wa_id: string },
   userId: string,
+  organizationId: string,
   accessToken: string
 ) {
   const senderPhone = normalizePhone(message.from)
@@ -526,6 +531,7 @@ async function processMessage(
   // Find or create contact
   const contactOutcome = await findOrCreateContact(
     userId,
+    organizationId,
     senderPhone,
     contactName
   )
@@ -535,6 +541,7 @@ async function processMessage(
   // Find or create conversation
   const conversation = await findOrCreateConversation(
     userId,
+    organizationId,
     contactRecord.id
   )
   if (!conversation) return
@@ -602,7 +609,8 @@ async function processMessage(
     .eq('sender_type', 'customer')
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
 
-  const { error: msgError } = await supabaseAdmin().from('messages').insert({
+  const { data: messageRecord, error: msgError } = await supabaseAdmin().from('messages').insert({
+    organization_id: organizationId,
     conversation_id: conversation.id,
     sender_type: 'customer',
     content_type: contentType,
@@ -616,7 +624,7 @@ async function processMessage(
     // the column; null for every other content_type so existing inserts
     // behave identically.
     interactive_reply_id: interactiveReplyId,
-  })
+  }).select('id').single()
 
   if (msgError) {
     console.error('Error inserting message:', msgError)
@@ -642,6 +650,37 @@ async function processMessage(
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
+
+  await dispatchN8nEvent({
+    organizationId,
+    event: 'message.received',
+    entityType: 'messages',
+    entityId: messageRecord?.id ?? null,
+    idempotencyKey: `whatsapp:${message.id}:message.received`,
+    payload: {
+      contactId: contactRecord.id,
+      conversationId: conversation.id,
+      customerPhone: contactRecord.phone ?? '',
+      customerName: contactRecord.name ?? '',
+      messageSummary: contentText ?? `[${message.type}]`,
+      contentType,
+    },
+  })
+
+  if (contactOutcome.wasCreated) {
+    await dispatchN8nEvent({
+      organizationId,
+      event: 'contact.created',
+      entityType: 'contacts',
+      entityId: contactRecord.id,
+      idempotencyKey: `whatsapp:${message.id}:contact.created:${contactRecord.id}`,
+      payload: {
+        contactId: contactRecord.id,
+        customerPhone: contactRecord.phone ?? '',
+        customerName: contactRecord.name ?? '',
+      },
+    })
+  }
 
   const automationMode = conversation.automation_mode === 'human' ? 'human' : 'agent'
 
@@ -736,6 +775,20 @@ async function processMessage(
   } else {
     console.log('[automations] skipped because conversation is in human mode', {
       conversation_id: conversation.id,
+    })
+  }
+
+  if (automationMode === 'agent' && messageRecord?.id) {
+    await runRealEstateAgents({
+      organizationId,
+      userId,
+      contactId: contactRecord.id,
+      conversationId: conversation.id,
+      messageId: messageRecord.id,
+      metaMessageId: message.id,
+      text: inboundText,
+      customerPhone: contactRecord.phone ?? '',
+      customerName: contactRecord.name ?? '',
     })
   }
 }
@@ -897,6 +950,7 @@ interface ContactOutcome {
 
 async function findOrCreateContact(
   userId: string,
+  organizationId: string,
   phone: string,
   name: string
 ): Promise<ContactOutcome | null> {
@@ -904,7 +958,7 @@ async function findOrCreateContact(
   const { data: contacts, error: contactsError } = await supabaseAdmin()
     .from('contacts')
     .select('*')
-    .eq('user_id', userId)
+    .eq('organization_id', organizationId)
 
   if (contactsError) {
     console.error('Error fetching contacts:', contactsError)
@@ -929,6 +983,7 @@ async function findOrCreateContact(
   const { data: newContact, error: createError } = await supabaseAdmin()
     .from('contacts')
     .insert({
+      organization_id: organizationId,
       user_id: userId,
       phone,
       name: name || phone,
@@ -944,12 +999,12 @@ async function findOrCreateContact(
   return { contact: newContact, wasCreated: true }
 }
 
-async function findOrCreateConversation(userId: string, contactId: string) {
+async function findOrCreateConversation(userId: string, organizationId: string, contactId: string) {
   // Look for existing conversation
   const { data: existing, error: findError } = await supabaseAdmin()
     .from('conversations')
     .select('*')
-    .eq('user_id', userId)
+    .eq('organization_id', organizationId)
     .eq('contact_id', contactId)
     .single()
 
@@ -961,6 +1016,7 @@ async function findOrCreateConversation(userId: string, contactId: string) {
   const { data: newConv, error: createError } = await supabaseAdmin()
     .from('conversations')
     .insert({
+      organization_id: organizationId,
       user_id: userId,
       contact_id: contactId,
     })
