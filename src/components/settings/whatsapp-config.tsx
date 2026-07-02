@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   RotateCcw,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,8 +33,36 @@ const MASKED_TOKEN = '••••••••••••••••';
 type ConnectionStatus = 'connected' | 'disconnected' | 'unknown';
 type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
 
+interface WhatsAppConfigApiResponse {
+  connected?: boolean;
+  config?: WhatsAppConfigType & {
+    has_access_token?: boolean;
+    has_verify_token?: boolean;
+  };
+  phone_info?: {
+    verified_name?: string;
+  };
+  reason?: string;
+  message?: string;
+  error?: string;
+  details?: string;
+  needs_reset?: boolean;
+}
+
+async function readJsonResponse(res: Response): Promise<WhatsAppConfigApiResponse> {
+  try {
+    return (await res.json()) as WhatsAppConfigApiResponse;
+  } catch {
+    return {};
+  }
+}
+
+function apiErrorMessage(payload: WhatsAppConfigApiResponse, fallback: string) {
+  const primary = payload.error || payload.message || fallback;
+  return payload.details ? `${primary}: ${payload.details}` : primary;
+}
+
 export function WhatsAppConfig() {
-  const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -59,24 +86,24 @@ export function WhatsAppConfig() {
       ? `${window.location.origin}/api/whatsapp/webhook`
       : '';
 
-  const fetchConfig = useCallback(async (userId: string) => {
+  const fetchConfig = useCallback(async () => {
     setLoading(true);
     try {
-      // Load form values from Supabase (shows what's in DB)
-      const { data, error } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
+      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const payload = await readJsonResponse(res);
 
-      if (error) {
-        console.error('Failed to load config row:', error);
+      if (!res.ok) {
+        const message = apiErrorMessage(payload, 'Failed to load WhatsApp configuration');
+        setConnectionStatus('disconnected');
+        setStatusMessage(message);
+        toast.error(message);
+        return;
       }
 
-      if (data) {
-        setConfig(data);
-        setPhoneNumberId(data.phone_number_id || '');
-        setWabaId(data.waba_id || '');
+      if (payload.config) {
+        setConfig(payload.config);
+        setPhoneNumberId(payload.config.phone_number_id || '');
+        setWabaId(payload.config.waba_id || '');
         setAccessToken(MASKED_TOKEN);
         setVerifyToken('');
         setTokenEdited(false);
@@ -89,29 +116,14 @@ export function WhatsAppConfig() {
         setTokenEdited(false);
       }
 
-      // Then verify health via the API (decrypts token + pings Meta)
-      if (data) {
-        try {
-          const res = await fetch('/api/whatsapp/config', { method: 'GET' });
-          const payload = await res.json();
-
-          if (payload.connected) {
-            setConnectionStatus('connected');
-            setResetReason(null);
-            setStatusMessage('');
-          } else {
-            setConnectionStatus('disconnected');
-            setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
-            setStatusMessage(payload.message || '');
-          }
-        } catch (err) {
-          console.error('Health check failed:', err);
-          setConnectionStatus('disconnected');
-        }
-      } else {
-        setConnectionStatus('disconnected');
+      if (payload.connected) {
+        setConnectionStatus('connected');
         setResetReason(null);
         setStatusMessage('');
+      } else {
+        setConnectionStatus('disconnected');
+        setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
+        setStatusMessage(payload.message || '');
       }
     } catch (err) {
       console.error('fetchConfig error:', err);
@@ -119,7 +131,7 @@ export function WhatsAppConfig() {
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -127,7 +139,7 @@ export function WhatsAppConfig() {
       setLoading(false);
       return;
     }
-    fetchConfig(user.id);
+    fetchConfig();
   }, [authLoading, user, fetchConfig]);
 
   async function handleSave() {
@@ -171,10 +183,10 @@ export function WhatsAppConfig() {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse(res);
 
       if (!res.ok) {
-        toast.error(data.error || 'Failed to save configuration');
+        toast.error(apiErrorMessage(data, 'Failed to save configuration'));
         setSaving(false);
         return;
       }
@@ -185,7 +197,7 @@ export function WhatsAppConfig() {
           : 'Configuration saved successfully'
       );
 
-      if (user) await fetchConfig(user.id);
+      if (user) await fetchConfig();
     } catch (err) {
       console.error('Save error:', err);
       toast.error('Failed to save configuration');
@@ -198,9 +210,9 @@ export function WhatsAppConfig() {
     try {
       setTesting(true);
       const res = await fetch('/api/whatsapp/config', { method: 'GET' });
-      const payload = await res.json();
+      const payload = await readJsonResponse(res);
 
-      if (payload.connected) {
+      if (res.ok && payload.connected) {
         setConnectionStatus('connected');
         setResetReason(null);
         setStatusMessage('');
@@ -212,8 +224,8 @@ export function WhatsAppConfig() {
       } else {
         setConnectionStatus('disconnected');
         setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
-        setStatusMessage(payload.message || '');
-        toast.error(payload.message || 'API connection failed');
+        setStatusMessage(apiErrorMessage(payload, 'API connection failed'));
+        toast.error(apiErrorMessage(payload, 'API connection failed'));
       }
     } catch (err) {
       console.error('Test connection error:', err);
@@ -232,10 +244,10 @@ export function WhatsAppConfig() {
     try {
       setResetting(true);
       const res = await fetch('/api/whatsapp/config', { method: 'DELETE' });
-      const data = await res.json();
+      const data = await readJsonResponse(res);
 
       if (!res.ok) {
-        toast.error(data.error || 'Failed to reset configuration');
+        toast.error(apiErrorMessage(data, 'Failed to reset configuration'));
         return;
       }
 

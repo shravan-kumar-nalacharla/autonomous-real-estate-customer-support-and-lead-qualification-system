@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { requireOrganizationContext } from '@/lib/organizations'
 import { verifyPhoneNumber } from '@/lib/whatsapp/meta-api'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 
@@ -20,6 +20,45 @@ function supabaseAdmin() {
   return _adminClient
 }
 
+type WhatsAppConfigRow = {
+  id: string
+  user_id: string
+  organization_id: string | null
+  phone_number_id: string
+  waba_id: string | null
+  access_token: string
+  verify_token: string | null
+  status: 'connected' | 'disconnected'
+  connected_at: string | null
+}
+
+function sanitizeConfig(config: WhatsAppConfigRow) {
+  return {
+    id: config.id,
+    user_id: config.user_id,
+    organization_id: config.organization_id,
+    phone_number_id: config.phone_number_id,
+    waba_id: config.waba_id,
+    access_token: config.access_token ? '[configured]' : '',
+    verify_token: config.verify_token ? '[configured]' : undefined,
+    status: config.status,
+    connected_at: config.connected_at,
+    has_access_token: Boolean(config.access_token),
+    has_verify_token: Boolean(config.verify_token),
+  }
+}
+
+function dbErrorResponse(message: string, error: { message?: string; code?: string }) {
+  return NextResponse.json(
+    {
+      error: message,
+      details: error.message,
+      code: error.code,
+    },
+    { status: 500 }
+  )
+}
+
 /**
  * GET /api/whatsapp/config
  *
@@ -35,21 +74,14 @@ function supabaseAdmin() {
  */
 export async function GET() {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const guard = await requireOrganizationContext(['owner', 'admin', 'manager'])
+    if (!guard.ok) return guard.response
+    const { supabase } = guard
 
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
-      .select('phone_number_id, access_token, status')
-      .eq('user_id', user.id)
+      .select('id, user_id, organization_id, phone_number_id, waba_id, access_token, verify_token, status, connected_at')
+      .eq('organization_id', guard.organizationId)
       .maybeSingle()
 
     if (configError) {
@@ -83,6 +115,7 @@ export async function GET() {
           connected: false,
           reason: 'token_corrupted',
           needs_reset: true,
+          config: sanitizeConfig(config as WhatsAppConfigRow),
           message:
             'The stored access token cannot be decrypted with the current ENCRYPTION_KEY. This usually means the key changed, or it differs between environments (local vs Hostinger vs Vercel). Click "Reset Configuration" below, then re-save.',
         },
@@ -96,7 +129,11 @@ export async function GET() {
         phoneNumberId: config.phone_number_id,
         accessToken,
       })
-      return NextResponse.json({ connected: true, phone_info: phoneInfo })
+      return NextResponse.json({
+        connected: true,
+        config: sanitizeConfig(config as WhatsAppConfigRow),
+        phone_info: phoneInfo,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown Meta API error'
       console.error('[whatsapp/config GET] Meta API verification failed:', message)
@@ -104,6 +141,7 @@ export async function GET() {
         {
           connected: false,
           reason: 'meta_api_error',
+          config: sanitizeConfig(config as WhatsAppConfigRow),
           message: `Meta API rejected the credentials: ${message}`,
         },
         { status: 200 }
@@ -126,16 +164,9 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const guard = await requireOrganizationContext(['owner', 'admin', 'manager'])
+    if (!guard.ok) return guard.response
+    const { supabase, user, organizationId } = guard
 
     const body = await request.json()
     const { phone_number_id, waba_id, access_token, verify_token } = body
@@ -154,9 +185,9 @@ export async function POST(request: Request) {
     // inbound message. See issue #136.
     const { data: claimed, error: claimedError } = await supabaseAdmin()
       .from('whatsapp_config')
-      .select('user_id')
+      .select('user_id, organization_id')
       .eq('phone_number_id', phone_number_id)
-      .neq('user_id', user.id)
+      .neq('organization_id', organizationId)
       .maybeSingle()
 
     if (claimedError) {
@@ -171,7 +202,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            'This WhatsApp phone number is already linked to another account on this instance. Each phone number can only be connected to one wacrm user.',
+            'This WhatsApp phone number is already linked to another organization on this instance.',
         },
         { status: 409 }
       )
@@ -215,7 +246,7 @@ export async function POST(request: Request) {
     const { data: existing } = await supabase
       .from('whatsapp_config')
       .select('id')
-      .eq('user_id', user.id)
+      .eq('organization_id', organizationId)
       .maybeSingle()
 
     if (existing) {
@@ -224,6 +255,7 @@ export async function POST(request: Request) {
         .update({
           phone_number_id,
           waba_id: waba_id || null,
+          organization_id: organizationId,
           access_token: encryptedAccessToken,
           verify_token: encryptedVerifyToken,
           status: 'connected',
@@ -234,16 +266,14 @@ export async function POST(request: Request) {
 
       if (updateError) {
         console.error('Error updating whatsapp_config:', updateError)
-        return NextResponse.json(
-          { error: 'Failed to update configuration' },
-          { status: 500 }
-        )
+        return dbErrorResponse('Failed to update configuration', updateError)
       }
     } else {
       const { error: insertError } = await supabase
         .from('whatsapp_config')
         .insert({
           user_id: user.id,
+          organization_id: organizationId,
           phone_number_id,
           waba_id: waba_id || null,
           access_token: encryptedAccessToken,
@@ -254,10 +284,7 @@ export async function POST(request: Request) {
 
       if (insertError) {
         console.error('Error inserting whatsapp_config:', insertError)
-        return NextResponse.json(
-          { error: 'Failed to save configuration' },
-          { status: 500 }
-        )
+        return dbErrorResponse('Failed to save configuration', insertError)
       }
     }
 
@@ -277,21 +304,14 @@ export async function POST(request: Request) {
  */
 export async function DELETE() {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const guard = await requireOrganizationContext(['owner', 'admin', 'manager'])
+    if (!guard.ok) return guard.response
+    const { supabase } = guard
 
     const { error: deleteError } = await supabase
       .from('whatsapp_config')
       .delete()
-      .eq('user_id', user.id)
+      .eq('organization_id', guard.organizationId)
 
     if (deleteError) {
       console.error('Error deleting whatsapp_config:', deleteError)
