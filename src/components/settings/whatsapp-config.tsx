@@ -29,6 +29,9 @@ import {
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 
 const MASKED_TOKEN = '••••••••••••••••';
+const LOAD_TIMEOUT_MS = 12_000;
+const TEST_TIMEOUT_MS = 25_000;
+const DRAFT_STORAGE_PREFIX = 'huygen:whatsapp-config-draft';
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'unknown';
 type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
@@ -47,6 +50,49 @@ interface WhatsAppConfigApiResponse {
   error?: string;
   details?: string;
   needs_reset?: boolean;
+}
+
+interface WhatsAppConfigDraft {
+  phoneNumberId?: string;
+  wabaId?: string;
+  accessToken?: string;
+  verifyToken?: string;
+  tokenEdited?: boolean;
+}
+
+function draftKey(userId: string) {
+  return `${DRAFT_STORAGE_PREFIX}:${userId}`;
+}
+
+function loadDraft(userId: string): WhatsAppConfigDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(draftKey(userId));
+    return raw ? (JSON.parse(raw) as WhatsAppConfigDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(userId: string, draft: WhatsAppConfigDraft) {
+  window.sessionStorage.setItem(draftKey(userId), JSON.stringify(draft));
+}
+
+function clearDraft(userId: string) {
+  window.sessionStorage.removeItem(draftKey(userId));
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 async function readJsonResponse(res: Response): Promise<WhatsAppConfigApiResponse> {
@@ -80,6 +126,7 @@ export function WhatsAppConfig() {
   const [accessToken, setAccessToken] = useState('');
   const [verifyToken, setVerifyToken] = useState('');
   const [tokenEdited, setTokenEdited] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
 
   const webhookUrl =
     typeof window !== 'undefined'
@@ -88,8 +135,13 @@ export function WhatsAppConfig() {
 
   const fetchConfig = useCallback(async () => {
     setLoading(true);
+    setDraftReady(false);
     try {
-      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const res = await fetchWithTimeout(
+        '/api/whatsapp/config?verify=false',
+        { method: 'GET' },
+        LOAD_TIMEOUT_MS,
+      );
       const payload = await readJsonResponse(res);
 
       if (!res.ok) {
@@ -100,20 +152,22 @@ export function WhatsAppConfig() {
         return;
       }
 
+      const draft = user ? loadDraft(user.id) : null;
+
       if (payload.config) {
         setConfig(payload.config);
-        setPhoneNumberId(payload.config.phone_number_id || '');
-        setWabaId(payload.config.waba_id || '');
-        setAccessToken(MASKED_TOKEN);
-        setVerifyToken('');
-        setTokenEdited(false);
+        setPhoneNumberId(draft?.phoneNumberId ?? payload.config.phone_number_id ?? '');
+        setWabaId(draft?.wabaId ?? payload.config.waba_id ?? '');
+        setAccessToken(draft?.accessToken || MASKED_TOKEN);
+        setVerifyToken(draft?.verifyToken ?? '');
+        setTokenEdited(Boolean(draft?.tokenEdited && draft.accessToken));
       } else {
         setConfig(null);
-        setPhoneNumberId('');
-        setWabaId('');
-        setAccessToken('');
-        setVerifyToken('');
-        setTokenEdited(false);
+        setPhoneNumberId(draft?.phoneNumberId ?? '');
+        setWabaId(draft?.wabaId ?? '');
+        setAccessToken(draft?.accessToken ?? '');
+        setVerifyToken(draft?.verifyToken ?? '');
+        setTokenEdited(Boolean(draft?.tokenEdited && draft.accessToken));
       }
 
       if (payload.connected) {
@@ -127,11 +181,22 @@ export function WhatsAppConfig() {
       }
     } catch (err) {
       console.error('fetchConfig error:', err);
-      toast.error('Failed to load WhatsApp configuration');
+      const draft = user ? loadDraft(user.id) : null;
+      if (draft) {
+        setPhoneNumberId(draft.phoneNumberId ?? '');
+        setWabaId(draft.wabaId ?? '');
+        setAccessToken(draft.accessToken ?? '');
+        setVerifyToken(draft.verifyToken ?? '');
+        setTokenEdited(Boolean(draft.tokenEdited && draft.accessToken));
+        toast.warning('Loaded your unsaved draft. Saved configuration is taking too long to respond.');
+      } else {
+        toast.error('Failed to load WhatsApp configuration');
+      }
     } finally {
       setLoading(false);
+      setDraftReady(true);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -141,6 +206,27 @@ export function WhatsAppConfig() {
     }
     fetchConfig();
   }, [authLoading, user, fetchConfig]);
+
+  useEffect(() => {
+    if (!user || !draftReady) return;
+
+    saveDraft(user.id, {
+      phoneNumberId,
+      wabaId,
+      accessToken:
+        tokenEdited && accessToken !== MASKED_TOKEN ? accessToken : undefined,
+      verifyToken,
+      tokenEdited,
+    });
+  }, [
+    accessToken,
+    draftReady,
+    phoneNumberId,
+    tokenEdited,
+    user,
+    verifyToken,
+    wabaId,
+  ]);
 
   async function handleSave() {
     if (!phoneNumberId.trim()) {
@@ -177,11 +263,15 @@ export function WhatsAppConfig() {
         return;
       }
 
-      const res = await fetch('/api/whatsapp/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetchWithTimeout(
+        '/api/whatsapp/config',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        TEST_TIMEOUT_MS,
+      );
 
       const data = await readJsonResponse(res);
 
@@ -197,6 +287,7 @@ export function WhatsAppConfig() {
           : 'Configuration saved successfully'
       );
 
+      if (user) clearDraft(user.id);
       if (user) await fetchConfig();
     } catch (err) {
       console.error('Save error:', err);
@@ -209,7 +300,11 @@ export function WhatsAppConfig() {
   async function handleTestConnection() {
     try {
       setTesting(true);
-      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const res = await fetchWithTimeout(
+        '/api/whatsapp/config?verify=true',
+        { method: 'GET' },
+        TEST_TIMEOUT_MS,
+      );
       const payload = await readJsonResponse(res);
 
       if (res.ok && payload.connected) {
@@ -230,7 +325,7 @@ export function WhatsAppConfig() {
     } catch (err) {
       console.error('Test connection error:', err);
       setConnectionStatus('disconnected');
-      toast.error('Connection test failed. Check network and try again.');
+      toast.error('Connection test timed out or failed. Check network and try again.');
     } finally {
       setTesting(false);
     }
@@ -243,7 +338,11 @@ export function WhatsAppConfig() {
 
     try {
       setResetting(true);
-      const res = await fetch('/api/whatsapp/config', { method: 'DELETE' });
+      const res = await fetchWithTimeout(
+        '/api/whatsapp/config',
+        { method: 'DELETE' },
+        LOAD_TIMEOUT_MS,
+      );
       const data = await readJsonResponse(res);
 
       if (!res.ok) {
@@ -252,6 +351,7 @@ export function WhatsAppConfig() {
       }
 
       toast.success('Configuration cleared. You can now re-enter your credentials.');
+      if (user) clearDraft(user.id);
       setConfig(null);
       setPhoneNumberId('');
       setWabaId('');

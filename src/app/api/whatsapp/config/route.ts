@@ -72,8 +72,10 @@ function dbErrorResponse(message: string, error: { message?: string; code?: stri
  *   { connected: false, reason: 'token_corrupted',  message: '...', needs_reset: true }
  *   { connected: false, reason: 'meta_api_error',   message: '...' }
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const shouldVerify =
+      new URL(request.url).searchParams.get('verify') !== 'false'
     const guard = await requireOrganizationContext(['owner', 'admin', 'manager'])
     if (!guard.ok) return guard.response
     const { supabase } = guard
@@ -101,6 +103,13 @@ export async function GET() {
         },
         { status: 200 }
       )
+    }
+
+    if (!shouldVerify) {
+      return NextResponse.json({
+        connected: config.status === 'connected',
+        config: sanitizeConfig(config as WhatsAppConfigRow),
+      })
     }
 
     // Try to decrypt the stored token with the current ENCRYPTION_KEY.
