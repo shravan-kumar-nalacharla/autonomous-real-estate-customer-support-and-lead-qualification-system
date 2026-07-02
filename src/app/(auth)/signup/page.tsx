@@ -16,6 +16,14 @@ import {
 } from "@/components/ui/card";
 import { MessageSquare, CheckCircle } from "lucide-react";
 
+function getAuthRedirectUrl(next: string) {
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    window.location.origin;
+
+  return `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`;
+}
+
 export default function SignupPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -51,7 +59,7 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+        emailRedirectTo: getAuthRedirectUrl("/dashboard"),
         data: {
           full_name: fullName,
         },
