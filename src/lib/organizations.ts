@@ -35,6 +35,41 @@ function hasAnyRole(role: OrganizationRole, allowed: readonly OrganizationRole[]
   return allowed.includes(role);
 }
 
+async function resolveMembership(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+) {
+  const [{ data: profile }, { data: memberships, error: membershipError }] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("active_organization_id")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      supabase
+        .from("organization_members")
+        .select("organization_id, role")
+        .eq("user_id", userId)
+        .eq("status", "active"),
+    ]);
+
+  if (membershipError) {
+    return { profile, rows: [], error: membershipError };
+  }
+
+  const rows = ((memberships ?? []) as OrganizationMembership[]).sort(roleSort);
+  return { profile, rows, error: null };
+}
+
+function selectMembership(
+  profile: unknown,
+  rows: OrganizationMembership[],
+) {
+  const activeOrg = (profile as { active_organization_id?: string | null } | null)
+    ?.active_organization_id;
+  return rows.find((row) => row.organization_id === activeOrg) ?? rows[0];
+}
+
 export async function requireOrganizationContext(
   allowedRoles?: readonly OrganizationRole[],
 ): Promise<OrganizationGuard> {
@@ -51,19 +86,10 @@ export async function requireOrganizationContext(
     };
   }
 
-  const [{ data: profile }, { data: memberships, error: membershipError }] =
-    await Promise.all([
-      supabase
-        .from("profiles")
-        .select("active_organization_id")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-      supabase
-        .from("organization_members")
-        .select("organization_id, role")
-        .eq("user_id", user.id)
-        .eq("status", "active"),
-    ]);
+  let { profile, rows, error: membershipError } = await resolveMembership(
+    supabase,
+    user.id,
+  );
 
   if (membershipError) {
     return {
@@ -75,20 +101,33 @@ export async function requireOrganizationContext(
     };
   }
 
-  const rows = ((memberships ?? []) as OrganizationMembership[]).sort(roleSort);
-  const activeOrg = (profile as { active_organization_id?: string | null } | null)
-    ?.active_organization_id;
-  const membership =
-    rows.find((row) => row.organization_id === activeOrg) ?? rows[0];
+  let membership = selectMembership(profile, rows);
 
   if (!membership) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "No active organization membership" },
-        { status: 403 },
-      ),
-    };
+    const { error: ensureError } = await supabase.rpc("ensure_user_organization", {
+      p_user_id: user.id,
+    });
+
+    if (!ensureError) {
+      const refreshed = await resolveMembership(supabase, user.id);
+      profile = refreshed.profile;
+      rows = refreshed.rows;
+      membershipError = refreshed.error;
+      membership = selectMembership(profile, rows);
+    }
+
+    if (ensureError || membershipError || !membership) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            error:
+              "No active organization membership. Run the latest Supabase migrations or create an organization membership for this user.",
+          },
+          { status: 403 },
+        ),
+      };
+    }
   }
 
   if (allowedRoles && !hasAnyRole(membership.role, allowedRoles)) {
@@ -121,4 +160,3 @@ export async function getUserOrganizationIds(
     (row) => row.organization_id,
   );
 }
-
