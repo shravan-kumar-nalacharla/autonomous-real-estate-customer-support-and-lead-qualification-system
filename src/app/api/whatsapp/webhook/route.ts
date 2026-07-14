@@ -763,6 +763,8 @@ async function processMessage(
         triggerType,
         contactId: contactRecord.id,
         context: {
+          organization_id: organizationId,
+          message_id: messageRecord?.id ?? '',
           message_text: inboundText,
           conversation_id: conversation.id,
           contact_id: contactRecord.id,

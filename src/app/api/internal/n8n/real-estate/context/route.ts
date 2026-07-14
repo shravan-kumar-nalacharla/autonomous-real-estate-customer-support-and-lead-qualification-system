@@ -116,7 +116,7 @@ export async function POST(request: Request) {
           pipeline_stage: conversation.pipeline_stage ?? null,
         }
       : null,
-    lead_requirements: requirementsResult.data,
+    lead_requirements: requirementsResult.data ?? {},
     latest_lead_score: scoreResult.data,
     recent_recommendations: recommendationsResult.data ?? [],
     active_appointments: appointmentsResult.data ?? [],

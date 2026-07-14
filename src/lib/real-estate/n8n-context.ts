@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isUuid } from "@/lib/internal-secret";
+import { normalizePhone, phonesMatch } from "@/lib/whatsapp/phone-utils";
 
 export interface N8nEventEnvelope {
   organization_id?: string;
@@ -24,7 +25,12 @@ export async function resolveRealEstateContext(
 ): Promise<ResolvedRealEstateContext | { error: string; status: number }> {
   let conversation: Record<string, unknown> | null = null;
   let contact: Record<string, unknown> | null = null;
-  let organizationId = isUuid(event.organization_id) ? event.organization_id : null;
+  const inboundOrganizationId = normalizeInboundOrganizationId(event.organization_id);
+  if (inboundOrganizationId === "invalid") {
+    return { error: "organization_id must be a valid UUID or omitted", status: 400 };
+  }
+  let organizationId =
+    typeof inboundOrganizationId === "string" ? inboundOrganizationId : null;
 
   if (isUuid(event.conversation_id)) {
     const { data, error } = await db
@@ -35,7 +41,10 @@ export async function resolveRealEstateContext(
     if (error) return { error: error.message, status: 500 };
     if (!data) return { error: "Conversation not found", status: 404 };
     conversation = data as Record<string, unknown>;
-    organizationId = String(conversation.organization_id ?? organizationId ?? "");
+    organizationId = resolveCanonicalOrganizationId({
+      current: organizationId,
+      resolved: conversation.organization_id,
+    });
   }
 
   const contactId =
@@ -54,11 +63,55 @@ export async function resolveRealEstateContext(
     if (error) return { error: error.message, status: 500 };
     if (!data) return { error: "Contact not found", status: 404 };
     contact = data as Record<string, unknown>;
-    organizationId = String(contact.organization_id ?? organizationId ?? "");
+    organizationId = resolveCanonicalOrganizationId({
+      current: organizationId,
+      resolved: contact.organization_id,
+    });
+  }
+
+  if (!contact && event.customer_phone) {
+    const phoneResult = await findContactByPhone(db, {
+      phone: event.customer_phone,
+      organizationId,
+    });
+    if ("error" in phoneResult) return phoneResult;
+    contact = phoneResult.contact;
+    if (contact) {
+      organizationId = resolveCanonicalOrganizationId({
+        current: organizationId,
+        resolved: contact.organization_id,
+      });
+    }
+  }
+
+  if (!conversation && contact?.id && contact?.organization_id) {
+    const { data, error } = await db
+      .from("conversations")
+      .select("*")
+      .eq("organization_id", String(contact.organization_id))
+      .eq("contact_id", String(contact.id))
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return { error: error.message, status: 500 };
+    conversation = (data as Record<string, unknown> | null) ?? null;
+    if (conversation) {
+      organizationId = resolveCanonicalOrganizationId({
+        current: organizationId,
+        resolved: conversation.organization_id,
+      });
+    }
   }
 
   if (!organizationId) {
     return { error: "organization_id could not be resolved", status: 400 };
+  }
+
+  if (
+    typeof inboundOrganizationId === "string" &&
+    inboundOrganizationId !== organizationId
+  ) {
+    return { error: "Organization mismatch", status: 403 };
   }
 
   if (conversation?.organization_id && conversation.organization_id !== organizationId) {
@@ -78,6 +131,56 @@ export async function resolveRealEstateContext(
   }
 
   return { organizationId, conversation, contact };
+}
+
+export function normalizeInboundOrganizationId(value: unknown) {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "default-org" ||
+    lower === "unknown" ||
+    lower === "null" ||
+    lower === "undefined"
+  ) {
+    return null;
+  }
+  return isUuid(trimmed) ? trimmed : "invalid";
+}
+
+function resolveCanonicalOrganizationId(args: {
+  current: string | null;
+  resolved: unknown;
+}) {
+  const resolved = typeof args.resolved === "string" ? args.resolved : "";
+  return args.current ?? resolved;
+}
+
+async function findContactByPhone(
+  db: SupabaseClient,
+  args: { phone: string; organizationId: string | null },
+): Promise<
+  | { contact: Record<string, unknown> | null }
+  | { error: string; status: number }
+> {
+  const target = normalizePhone(args.phone);
+  if (!target) return { contact: null };
+
+  let query = db.from("contacts").select("*");
+  if (args.organizationId) {
+    query = query.eq("organization_id", args.organizationId);
+  }
+  const { data, error } = await query.limit(100);
+  if (error) return { error: error.message, status: 500 };
+
+  const matches = ((data ?? []) as Array<Record<string, unknown>>).filter((row) =>
+    phonesMatch(String(row.phone ?? ""), target),
+  );
+  if (matches.length > 1) {
+    return { error: "customer_phone matched multiple contacts", status: 409 };
+  }
+  return { contact: matches[0] ?? null };
 }
 
 export async function getEventDuplicateState(

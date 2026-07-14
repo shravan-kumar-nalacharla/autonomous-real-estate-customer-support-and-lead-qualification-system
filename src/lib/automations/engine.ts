@@ -22,6 +22,10 @@ import { engineSendText, engineSendTemplate } from './meta-send'
 // ------------------------------------------------------------
 
 export interface AutomationContext {
+  /** Organization that owns the event. */
+  organization_id?: string
+  /** CRM message row id for inbound-message triggers. */
+  message_id?: string
   /** Raw message text, for keyword_match + message_content conditions. */
   message_text?: string
   /** Conversation the event belongs to, if any. */
@@ -434,7 +438,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         return 'webhook skipped (conversation in human mode)'
       }
       if (!cfg.url) throw new Error('send_webhook needs url')
-      const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
+      const body = buildWebhookBody(cfg.body_template, args)
       const res = await fetch(cfg.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
@@ -457,6 +461,25 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
     default:
       return `unknown step: ${step.step_type}`
   }
+}
+
+export function buildWebhookBody(
+  bodyTemplate: string | undefined,
+  args: Pick<ExecuteArgs, 'context'>,
+): string {
+  return bodyTemplate?.trim()
+    ? interpolate(bodyTemplate, args as ExecuteArgs)
+    : JSON.stringify({
+        organization_id: args.context.organization_id ?? '',
+        conversation_id: args.context.conversation_id ?? '',
+        contact_id: args.context.contact_id ?? '',
+        message_id: args.context.message_id ?? '',
+        message_text: args.context.message_text ?? '',
+        customer_phone: args.context.customer_phone ?? '',
+        customer_name: args.context.customer_name ?? '',
+        automation_mode: args.context.automation_mode ?? 'agent',
+        vars: args.context.vars ?? {},
+      })
 }
 
 // ------------------------------------------------------------
@@ -553,6 +576,8 @@ function interpolate(s: string, args: ExecuteArgs): string {
   return s.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
     const [ns, prop] = String(key).split('.')
     if (ns === 'message' && prop === 'text') return String(args.context.message_text ?? '')
+    if (ns === 'message' && prop === 'id') return String(args.context.message_id ?? '')
+    if (ns === 'organization' && prop === 'id') return String(args.context.organization_id ?? '')
     if (ns === 'conversation' && prop === 'id') return String(args.context.conversation_id ?? '')
     if (ns === 'contact' && prop === 'id') return String(args.context.contact_id ?? '')
     if (ns === 'customer' && prop === 'phone') return String(args.context.customer_phone ?? '')
