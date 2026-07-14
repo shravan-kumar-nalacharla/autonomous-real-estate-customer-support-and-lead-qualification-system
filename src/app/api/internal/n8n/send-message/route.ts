@@ -17,6 +17,7 @@ import {
 
 interface SendBody {
   conversation_id?: string
+  contact_id?: string
   organization_id?: string
   idempotency_key?: string
   message_type?: 'text' | 'image' | 'template'
@@ -26,7 +27,11 @@ interface SendBody {
   template_name?: string
   template_language?: string
   template_params?: string[]
+  allow_agent_mode_send?: boolean
+  clear_stale_handoff_if_agent_mode?: boolean
 }
+
+const BLOCKED_AUTOMATION_MODES = new Set(['human', 'manual', 'paused', 'off'])
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -119,10 +124,14 @@ export async function POST(request: Request) {
     }
 
     const conversationId = body.conversation_id?.trim() ?? ''
+    const bodyContactId = body.contact_id?.trim() ?? ''
     const organizationId = body.organization_id?.trim() ?? ''
     const idempotencyKey = body.idempotency_key?.trim() ?? ''
     const messageType = body.message_type
     const contentText = body.content_text?.trim() || ''
+    const allowAgentModeSend = body.allow_agent_mode_send === true
+    const clearStaleHandoffIfAgentMode =
+      body.clear_stale_handoff_if_agent_mode === true
 
     if (!conversationId || !isUuid(conversationId)) {
       return NextResponse.json(
@@ -210,6 +219,13 @@ export async function POST(request: Request) {
       )
     }
 
+    if (bodyContactId && contact.id !== bodyContactId) {
+      return NextResponse.json(
+        { error: 'contact_id does not belong to conversation' },
+        { status: 403 },
+      )
+    }
+
     if (contact.opted_out) {
       return NextResponse.json(
         { error: 'Contact has opted out of WhatsApp replies' },
@@ -217,15 +233,39 @@ export async function POST(request: Request) {
       )
     }
 
-    if (
-      conversation.automation_mode === 'human' ||
-      conversation.automation_paused ||
-      conversation.assigned_agent_id
-    ) {
+    const { data: activeHandoff } = await db
+      .from('human_handoffs')
+      .select('id')
+      .eq('organization_id', conversation.organization_id)
+      .eq('conversation_id', conversationId)
+      .in('status', ['open', 'accepted'])
+      .limit(1)
+      .maybeSingle()
+
+    const sendState = evaluateN8nSendConversationState({
+      automationMode: conversation.automation_mode,
+      automationPaused: Boolean(conversation.automation_paused),
+      handoffActive: Boolean(activeHandoff),
+      assignedAgentId: conversation.assigned_agent_id ?? null,
+      allowAgentModeSend,
+    })
+
+    if (!sendState.allowed) {
       return NextResponse.json(
         { error: 'Conversation is human-owned or automation is paused' },
         { status: 409 },
       )
+    }
+
+    if (
+      sendState.clearStaleHandoffAllowed &&
+      clearStaleHandoffIfAgentMode
+    ) {
+      await clearStaleAgentModeHandoff({
+        db,
+        organizationId: conversation.organization_id,
+        conversationId,
+      })
     }
 
     if (messageType !== 'template') {
@@ -433,4 +473,61 @@ export async function POST(request: Request) {
       { status: 500 },
     )
   }
+}
+
+export function evaluateN8nSendConversationState(args: {
+  automationMode?: string | null
+  automationPaused: boolean
+  handoffActive: boolean
+  assignedAgentId?: string | null
+  allowAgentModeSend: boolean
+}) {
+  const automationMode = args.automationMode ?? 'agent'
+  const isAgentMode = automationMode === 'agent'
+  const isHumanMode = BLOCKED_AUTOMATION_MODES.has(automationMode)
+
+  if (args.automationPaused || isHumanMode) {
+    return { allowed: false, clearStaleHandoffAllowed: false }
+  }
+
+  if (args.handoffActive && !(isAgentMode && args.allowAgentModeSend)) {
+    return { allowed: false, clearStaleHandoffAllowed: false }
+  }
+
+  if (args.assignedAgentId && !(isAgentMode && args.allowAgentModeSend)) {
+    return { allowed: false, clearStaleHandoffAllowed: false }
+  }
+
+  return {
+    allowed: true,
+    clearStaleHandoffAllowed:
+      args.handoffActive && isAgentMode && args.allowAgentModeSend,
+  }
+}
+
+async function clearStaleAgentModeHandoff(args: {
+  db: ReturnType<typeof supabaseAdmin>
+  organizationId: string
+  conversationId: string
+}) {
+  await args.db
+    .from('human_handoffs')
+    .update({
+      status: 'cancelled',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('organization_id', args.organizationId)
+    .eq('conversation_id', args.conversationId)
+    .in('status', ['open', 'accepted'])
+
+  await args.db
+    .from('conversations')
+    .update({
+      automation_mode: 'agent',
+      automation_paused: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+    .eq('organization_id', args.organizationId)
+    .eq('automation_mode', 'agent')
 }

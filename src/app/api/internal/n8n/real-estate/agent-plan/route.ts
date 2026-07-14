@@ -55,6 +55,11 @@ interface AgentPlanBody {
     idempotency_key?: string;
   }>;
   pipeline_update?: { requested_stage?: string };
+  conversation_update?: {
+    automation_mode?: string;
+    clear_handoff_active?: boolean;
+  };
+  allow_agent_mode_send?: boolean;
 }
 
 const PIPELINE_STAGES = new Set([
@@ -119,6 +124,18 @@ export async function POST(request: Request) {
   let pipelineStage =
     normalizePipelineStage(body.pipeline_update?.requested_stage) ??
     inferPipelineStage(body);
+
+  if (
+    body.allow_agent_mode_send === true &&
+    body.conversation_update?.clear_handoff_active === true &&
+    body.conversation_update.automation_mode === "agent" &&
+    resolved.conversation.automation_mode === "agent"
+  ) {
+    await clearStaleAgentModeHandoff({
+      organizationId,
+      conversationId,
+    });
+  }
 
   if (body.requirements) {
     const { data, error } = await db
@@ -481,4 +498,31 @@ async function computeSendAllowed(
   if (!inboundAt) return Boolean(template);
   const withinWindow = Date.now() - new Date(inboundAt).getTime() <= 24 * 60 * 60 * 1000;
   return withinWindow || Boolean(template);
+}
+
+async function clearStaleAgentModeHandoff(args: {
+  organizationId: string;
+  conversationId: string;
+}) {
+  const db = supabaseAdmin();
+  await db
+    .from("human_handoffs")
+    .update({
+      status: "cancelled",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", args.organizationId)
+    .eq("conversation_id", args.conversationId)
+    .in("status", ["open", "accepted"]);
+
+  await db
+    .from("conversations")
+    .update({
+      automation_mode: "agent",
+      automation_paused: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", args.conversationId)
+    .eq("organization_id", args.organizationId)
+    .eq("automation_mode", "agent");
 }
