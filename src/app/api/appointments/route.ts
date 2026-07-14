@@ -8,7 +8,7 @@ export async function GET() {
   const { data, error } = await guard.supabase
     .from("appointments")
     .select(
-      "*, contact:contacts(name, phone), property:properties(title, location, locality)",
+      "*, contact:contacts(id, name, phone), property:properties(id, title, location, locality)",
     )
     .eq("organization_id", guard.organizationId)
     .order("created_at", { ascending: false })

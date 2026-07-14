@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   sendImageMessage,
+  sendTemplateMessage,
   sendTextMessage,
   uploadMediaFromBuffer,
 } from '@/lib/whatsapp/meta-api'
@@ -16,10 +17,15 @@ import {
 
 interface SendBody {
   conversation_id?: string
-  message_type?: 'text' | 'image'
+  organization_id?: string
+  idempotency_key?: string
+  message_type?: 'text' | 'image' | 'template'
   content_text?: string
   image_url?: string
   whatsapp_media_id?: string
+  template_name?: string
+  template_language?: string
+  template_params?: string[]
 }
 
 function isUuid(value: string): boolean {
@@ -113,6 +119,8 @@ export async function POST(request: Request) {
     }
 
     const conversationId = body.conversation_id?.trim() ?? ''
+    const organizationId = body.organization_id?.trim() ?? ''
+    const idempotencyKey = body.idempotency_key?.trim() ?? ''
     const messageType = body.message_type
     const contentText = body.content_text?.trim() || ''
 
@@ -123,9 +131,9 @@ export async function POST(request: Request) {
       )
     }
 
-    if (messageType !== 'text' && messageType !== 'image') {
+    if (messageType !== 'text' && messageType !== 'image' && messageType !== 'template') {
       return NextResponse.json(
-        { error: 'message_type must be "text" or "image"' },
+        { error: 'message_type must be "text", "image", or "template"' },
         { status: 400 },
       )
     }
@@ -137,7 +145,33 @@ export async function POST(request: Request) {
       )
     }
 
+    if (messageType === 'template' && !body.template_name?.trim()) {
+      return NextResponse.json(
+        { error: 'template_name is required for template messages' },
+        { status: 400 },
+      )
+    }
+
     const db = supabaseAdmin()
+
+    if (idempotencyKey) {
+      let duplicateQuery = db
+        .from('messages')
+        .select('id, message_id')
+        .eq('idempotency_key', idempotencyKey)
+      if (organizationId && isUuid(organizationId)) {
+        duplicateQuery = duplicateQuery.eq('organization_id', organizationId)
+      }
+      const { data: existingMessage } = await duplicateQuery.maybeSingle()
+      if (existingMessage) {
+        return NextResponse.json({
+          success: true,
+          duplicate: true,
+          message_id: existingMessage.id,
+          whatsapp_message_id: existingMessage.message_id,
+        })
+      }
+    }
 
     const { data: conversation, error: conversationError } = await db
       .from('conversations')
@@ -162,6 +196,62 @@ export async function POST(request: Request) {
       )
     }
 
+    if (organizationId && conversation.organization_id !== organizationId) {
+      return NextResponse.json(
+        { error: 'Conversation does not belong to organization' },
+        { status: 403 },
+      )
+    }
+
+    if (contact.organization_id && contact.organization_id !== conversation.organization_id) {
+      return NextResponse.json(
+        { error: 'Contact does not belong to conversation organization' },
+        { status: 403 },
+      )
+    }
+
+    if (contact.opted_out) {
+      return NextResponse.json(
+        { error: 'Contact has opted out of WhatsApp replies' },
+        { status: 403 },
+      )
+    }
+
+    if (
+      conversation.automation_mode === 'human' ||
+      conversation.automation_paused ||
+      conversation.assigned_agent_id
+    ) {
+      return NextResponse.json(
+        { error: 'Conversation is human-owned or automation is paused' },
+        { status: 409 },
+      )
+    }
+
+    if (messageType !== 'template') {
+      const { data: latestInbound } = await db
+        .from('messages')
+        .select('created_at')
+        .eq('conversation_id', conversationId)
+        .eq('sender_type', 'customer')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const inboundAt = latestInbound?.created_at
+      const insideServiceWindow =
+        inboundAt &&
+        Date.now() - new Date(inboundAt).getTime() <= 24 * 60 * 60 * 1000
+      if (!insideServiceWindow) {
+        return NextResponse.json(
+          {
+            error:
+              'Free-form WhatsApp replies require an inbound customer message inside the 24-hour service window. Use an approved template.',
+          },
+          { status: 403 },
+        )
+      }
+    }
+
     const sanitizedPhone = sanitizePhoneForMeta(contact.phone)
     if (!isValidE164(sanitizedPhone)) {
       return NextResponse.json(
@@ -170,26 +260,35 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await db
+    const { data: orgConfig } = await db
       .from('whatsapp_config')
       .select('*')
-      .eq('user_id', conversation.user_id)
-      .single()
+      .eq('organization_id', conversation.organization_id)
+      .maybeSingle()
 
-    if (configError || !config) {
-      return NextResponse.json(
-        { error: 'WhatsApp config not found for conversation owner' },
-        { status: 400 },
-      )
+    let activeConfig = orgConfig
+    if (!activeConfig) {
+      const fallback = await db
+        .from('whatsapp_config')
+        .select('*')
+        .eq('user_id', conversation.user_id)
+        .maybeSingle()
+      if (fallback.error || !fallback.data) {
+        return NextResponse.json(
+          { error: 'WhatsApp config not found for conversation organization' },
+          { status: 400 },
+        )
+      }
+      activeConfig = fallback.data
     }
 
-    const accessToken = decrypt(config.access_token)
+    const accessToken = decrypt(activeConfig.access_token)
 
     let imageMediaId: string | null = null
     if (messageType === 'image') {
       try {
         imageMediaId = await resolveImageMediaId({
-          phoneNumberId: config.phone_number_id,
+          phoneNumberId: activeConfig.phone_number_id,
           accessToken,
           imageUrl: body.image_url,
           whatsappMediaId: body.whatsapp_media_id,
@@ -208,7 +307,7 @@ export async function POST(request: Request) {
     const attemptSend = async (to: string): Promise<string> => {
       if (messageType === 'image' && imageMediaId) {
         const sent = await sendImageMessage({
-          phoneNumberId: config.phone_number_id,
+          phoneNumberId: activeConfig.phone_number_id,
           accessToken,
           to,
           mediaId: imageMediaId,
@@ -217,8 +316,20 @@ export async function POST(request: Request) {
         return sent.messageId
       }
 
+      if (messageType === 'template') {
+        const sent = await sendTemplateMessage({
+          phoneNumberId: activeConfig.phone_number_id,
+          accessToken,
+          to,
+          templateName: body.template_name!.trim(),
+          language: body.template_language ?? 'en_US',
+          params: body.template_params ?? [],
+        })
+        return sent.messageId
+      }
+
       const sent = await sendTextMessage({
-        phoneNumberId: config.phone_number_id,
+        phoneNumberId: activeConfig.phone_number_id,
         accessToken,
         to,
         text: contentText,
@@ -266,14 +377,17 @@ export async function POST(request: Request) {
 
     const messageInsert = {
       conversation_id: conversationId,
+      organization_id: conversation.organization_id,
       sender_type: 'bot',
-      content_type: messageType === 'image' ? 'image' : 'text',
+      content_type: messageType,
       content_text: messageType === 'image' ? (contentText || null) : contentText,
       media_url:
         messageType === 'image' && imageMediaId
           ? `/api/whatsapp/media/${imageMediaId}`
           : null,
+      template_name: messageType === 'template' ? body.template_name!.trim() : null,
       message_id: waMessageId,
+      idempotency_key: idempotencyKey || null,
       status: 'sent',
     }
 
@@ -298,7 +412,10 @@ export async function POST(request: Request) {
         last_message_text:
           messageType === 'text'
             ? contentText
-            : contentText || '[image]',
+            : contentText ||
+              (messageType === 'template'
+                ? `[template:${body.template_name!.trim()}]`
+                : '[image]'),
         last_message_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
