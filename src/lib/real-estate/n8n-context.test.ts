@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRealEstateContext } from "./n8n-context";
+import { deriveConversationMemory, resolveRealEstateContext } from "./n8n-context";
 
 const ORG_A = "85b1f316-b942-426e-b3b5-a84988ae717d";
 const ORG_B = "ad3d6bc5-9d90-4fa8-9691-716cc4a91018";
@@ -107,6 +107,47 @@ describe("resolveRealEstateContext", () => {
     });
 
     expect(resolved).toMatchObject({ organizationId: ORG_A });
+  });
+});
+
+describe("deriveConversationMemory", () => {
+  it("exposes recent menu and customer interactive reply context", () => {
+    const memory = deriveConversationMemory(
+      [
+        {
+          sender_type: "customer",
+          content_text: "Find Property",
+          interactive_reply_id: "find_property",
+          created_at: "2026-07-14T10:08:00.000Z",
+        },
+        {
+          sender_type: "bot",
+          content_type: "interactive",
+          content_text:
+            "Welcome to Huygen Realty. I can help you buy, rent, sell, or book a site visit.\n\nWhat are you looking for today?",
+          raw_payload: {
+            type: "button",
+            action: {
+              buttons: [
+                { type: "reply", reply: { id: "find_property", title: "Find Property" } },
+                { type: "reply", reply: { id: "book_site_visit", title: "Book Site Visit" } },
+                { type: "reply", reply: { id: "talk_to_agent", title: "Talk to Agent" } },
+              ],
+            },
+          },
+          created_at: "2026-07-14T10:00:00.000Z",
+        },
+      ],
+      new Date("2026-07-14T10:09:00.000Z"),
+    );
+
+    expect(memory).toMatchObject({
+      last_agent_intent: "greeting_menu",
+      last_agent_menu_sent_at: "2026-07-14T10:00:00.000Z",
+      last_agent_menu_sent_recently: true,
+      last_customer_message_text: "Find Property",
+      last_customer_interactive_reply_id: "find_property",
+    });
   });
 });
 

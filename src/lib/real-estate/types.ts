@@ -1,9 +1,16 @@
 export type LeadCategory = "hot" | "warm" | "cold" | "general_enquiry";
 
 export type RealEstateIntent =
+  | "greeting"
+  | "menu_find_property"
+  | "menu_book_site_visit"
+  | "menu_talk_to_agent"
   | "property_search"
   | "requirements_update"
   | "property_question"
+  | "seller_lead"
+  | "rental_enquiry"
+  | "commercial_enquiry"
   | "appointment_request"
   | "appointment_change"
   | "followup_response"

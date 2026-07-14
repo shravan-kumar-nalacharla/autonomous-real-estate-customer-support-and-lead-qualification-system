@@ -75,11 +75,17 @@ export async function runRealEstateAgents(input: AgentInput): Promise<void> {
     await updateLeadQualification(input, parsed, idempotencyBase);
   }
 
-  if (intent === "property_search" || hasRequirementUpdate) {
+  if (
+    intent === "property_search" ||
+    intent === "rental_enquiry" ||
+    intent === "commercial_enquiry" ||
+    intent === "seller_lead" ||
+    hasRequirementUpdate
+  ) {
     await recommendProperties(input, idempotencyBase);
   }
 
-  if (intent === "appointment_request") {
+  if (intent === "appointment_request" || intent === "menu_book_site_visit") {
     await createAppointmentRequest(input, idempotencyBase);
   } else if (intent === "appointment_change") {
     await createFollowUpTask(
@@ -91,6 +97,7 @@ export async function runRealEstateAgents(input: AgentInput): Promise<void> {
 
   if (
     intent === "human_support" ||
+    intent === "menu_talk_to_agent" ||
     intent === "complaint_or_sensitive" ||
     intent === "unknown"
   ) {
@@ -532,11 +539,24 @@ function baseActivity(
 }
 
 export function classifyIntent(text: string): RealEstateIntent {
-  const lower = text.toLowerCase();
+  const lower = normalizeActionText(text);
+  if (/^(hi|hello|hey|good morning|good evening|good afternoon|namaste)$/.test(lower)) {
+    return "greeting";
+  }
+  if (/^(find property|find_property|property search|1)$/.test(lower)) {
+    return "menu_find_property";
+  }
+  if (/^(book site visit|book_site_visit|site visit|2)$/.test(lower)) {
+    return "menu_book_site_visit";
+  }
+  if (/^(talk to agent|talk_to_agent|agent|human|3)$/.test(lower)) {
+    return "menu_talk_to_agent";
+  }
   if (/\b(stop|unsubscribe|opt out)\b/.test(lower)) return "human_support";
   if (/\b(complaint|angry|fraud|legal|lawyer|loan approval|negotiate|urgent)\b/.test(lower)) {
     return "complaint_or_sensitive";
   }
+  if (/\b(sell|seller|owner|landlord)\b/.test(lower)) return "seller_lead";
   if (/\b(human|agent|salesperson|call me|talk to)\b/.test(lower)) {
     return "human_support";
   }
@@ -545,6 +565,10 @@ export function classifyIntent(text: string): RealEstateIntent {
   }
   if (/\b(visit|site visit|appointment|schedule|book|meet)\b/.test(lower)) {
     return "appointment_request";
+  }
+  if (/\b(rent|rental|tenant|lease)\b/.test(lower)) return "rental_enquiry";
+  if (/\b(commercial|shop|office|warehouse|showroom)\b/.test(lower)) {
+    return "commercial_enquiry";
   }
   if (/\b(budget|bhk|bedroom|flat|villa|plot|rent|buy|purchase|location|near|looking for)\b/.test(lower)) {
     return "property_search";
@@ -565,6 +589,7 @@ export function parseRequirements(
   const budget = parseBudget(lower);
   const locations = parseLocations(text);
   const propertyType = parsePropertyType(lower);
+  const area = parseArea(lower);
   const listingType = /\b(rent|rental|lease)\b/.test(lower)
     ? "rent"
     : /\b(buy|purchase|sale)\b/.test(lower)
@@ -573,17 +598,85 @@ export function parseRequirements(
   const timeline = parseTimeline(lower);
 
   return {
+    customer_role: parseCustomerRole(lower, intent),
+    listing_intent: parseListingIntent(lower, intent),
+    property_category: parsePropertyCategory(lower),
     preferred_locations: locations.length ? locations : undefined,
     budget_min: budget.min,
     budget_max: budget.max,
+    currency: budget.min || budget.max ? "INR" : undefined,
     property_type: propertyType,
+    property_stage: propertyType === "plot" ? "land_plot" : undefined,
     bedroom_count: bedrooms ? Number(bedrooms[1]) : null,
+    bedrooms: bedrooms ? Number(bedrooms[1]) : null,
+    area_min: area.value,
+    area_max: area.value,
+    area_unit: area.unit,
+    plot_facing: parseFacing(lower),
     listing_type: listingType,
     timeline,
     financing_interest: /\b(loan|finance|emi|mortgage)\b/.test(lower) || null,
+    financing_required: /\b(loan|finance|emi|mortgage)\b/.test(lower) || null,
     site_visit_interest:
       intent === "appointment_request" || /\b(site visit|visit|schedule)\b/.test(lower),
+    preferred_appointment_time: parseAppointmentTime(lower),
   };
+}
+
+function normalizeActionText(text: string) {
+  return text.toLowerCase().trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+}
+
+function parseCustomerRole(lower: string, intent: RealEstateIntent) {
+  if (intent === "seller_lead" || /\b(sell|seller|owner)\b/.test(lower)) return "seller";
+  if (/\b(landlord)\b/.test(lower)) return "landlord";
+  if (/\b(investor|investment)\b/.test(lower)) return "investor";
+  if (/\b(broker|agent)\b/.test(lower)) return "broker";
+  if (/\b(rent|rental|tenant|lease)\b/.test(lower)) return "renter";
+  if (/\b(buy|purchase|looking for|plot|flat|villa|bhk)\b/.test(lower)) return "buyer";
+  return "unknown";
+}
+
+function parseListingIntent(lower: string, intent: RealEstateIntent) {
+  if (intent === "seller_lead" || /\b(sell|seller)\b/.test(lower)) return "sell";
+  if (/\b(rent|rental)\b/.test(lower)) return "rent";
+  if (/\blease\b/.test(lower)) return "lease";
+  if (/\b(buy|purchase|looking for|plot|flat|villa|bhk)\b/.test(lower)) return "buy";
+  return "unknown";
+}
+
+function parsePropertyCategory(lower: string) {
+  if (/\b(plot|land|acre|gunta|sq yd|sqyd|yard)\b/.test(lower)) return "land";
+  if (/\b(commercial|shop|office|warehouse|showroom)\b/.test(lower)) return "commercial";
+  if (/\b(flat|apartment|villa|house|bhk|residential)\b/.test(lower)) return "residential";
+  return "unknown";
+}
+
+function parseArea(lower: string): { value: number | null; unit: string | null } {
+  const match = lower.match(/\b(\d+(?:\.\d+)?)\s*(sq\.?\s*ft|sqft|square feet|sq\.?\s*yd|sqyd|sq yd|yard|yards|acre|acres|cent|cents|gunta|guntas)\b/);
+  if (!match) return { value: null, unit: null };
+  const rawUnit = match[2].replace(/\s+/g, "");
+  const unit = rawUnit.includes("yd") || rawUnit.includes("yard")
+    ? "sqyd"
+    : rawUnit.includes("ft") || rawUnit.includes("feet")
+      ? "sqft"
+      : rawUnit.includes("acre")
+        ? "acre"
+        : rawUnit.includes("cent")
+          ? "cent"
+          : "gunta";
+  return { value: Number(match[1]), unit };
+}
+
+function parseFacing(lower: string): string | null {
+  const match = lower.match(/\b(east|west|north|south|north east|north west|south east|south west)[ -]?facing\b/);
+  return match?.[1]?.replace(/\s+/g, "_") ?? null;
+}
+
+function parseAppointmentTime(lower: string): string | null {
+  const match = lower.match(/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend)\b(?:\s+(morning|afternoon|evening|night))?/);
+  if (!match) return null;
+  return [match[1], match[2]].filter(Boolean).join(" ");
 }
 
 function mergeRequirements(
@@ -591,29 +684,55 @@ function mergeRequirements(
   next: ParsedLeadRequirements,
 ): ParsedLeadRequirements {
   return {
+    customer_role: next.customer_role ?? current?.customer_role ?? null,
+    listing_intent: next.listing_intent ?? current?.listing_intent ?? null,
+    property_category: next.property_category ?? current?.property_category ?? null,
     preferred_locations:
       next.preferred_locations?.length
         ? unique([...(current?.preferred_locations ?? []), ...next.preferred_locations])
         : current?.preferred_locations ?? [],
     budget_min: next.budget_min ?? current?.budget_min ?? null,
     budget_max: next.budget_max ?? current?.budget_max ?? null,
+    currency: next.currency ?? current?.currency ?? null,
     property_type: next.property_type ?? current?.property_type ?? null,
+    property_stage: next.property_stage ?? current?.property_stage ?? null,
     bedroom_count: next.bedroom_count ?? current?.bedroom_count ?? null,
+    bedrooms: next.bedrooms ?? current?.bedrooms ?? null,
+    area_min: next.area_min ?? current?.area_min ?? null,
+    area_max: next.area_max ?? current?.area_max ?? null,
+    area_unit: next.area_unit ?? current?.area_unit ?? null,
+    plot_facing: next.plot_facing ?? current?.plot_facing ?? null,
     listing_type: next.listing_type ?? current?.listing_type ?? null,
     timeline: next.timeline ?? current?.timeline ?? null,
+    financing_required:
+      next.financing_required ?? current?.financing_required ?? null,
     financing_interest:
       next.financing_interest ?? current?.financing_interest ?? null,
     site_visit_interest:
       next.site_visit_interest ?? current?.site_visit_interest ?? false,
+    preferred_appointment_date:
+      next.preferred_appointment_date ?? current?.preferred_appointment_date ?? null,
+    preferred_appointment_time:
+      next.preferred_appointment_time ?? current?.preferred_appointment_time ?? null,
+    preferred_appointment_at:
+      next.preferred_appointment_at ?? current?.preferred_appointment_at ?? null,
+    property_reference:
+      next.property_reference ?? current?.property_reference ?? null,
   };
 }
 
 function hasRequirementSignal(parsed: ParsedLeadRequirements): boolean {
   return Boolean(
-    parsed.preferred_locations?.length ||
+    (parsed.customer_role && parsed.customer_role !== "unknown") ||
+      (parsed.listing_intent && parsed.listing_intent !== "unknown") ||
+      (parsed.property_category && parsed.property_category !== "unknown") ||
+      parsed.preferred_locations?.length ||
       parsed.budget_min != null ||
       parsed.budget_max != null ||
       parsed.property_type ||
+      parsed.area_min != null ||
+      parsed.area_max != null ||
+      parsed.plot_facing ||
       parsed.bedroom_count ||
       parsed.listing_type ||
       parsed.timeline ||

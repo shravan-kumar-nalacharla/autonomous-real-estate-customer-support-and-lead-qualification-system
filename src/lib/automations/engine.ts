@@ -28,6 +28,14 @@ export interface AutomationContext {
   message_id?: string
   /** Raw message text, for keyword_match + message_content conditions. */
   message_text?: string
+  /** Stable WhatsApp interactive reply id for button/list taps. */
+  interactive_reply_id?: string
+  /** Human-readable WhatsApp interactive reply title. */
+  interactive_reply_title?: string
+  /** Compatibility aliases used by external workflow builders. */
+  action_id?: string
+  button_id?: string
+  selected_option_id?: string
   /** Conversation the event belongs to, if any. */
   conversation_id?: string
   /** Contact id for conversation-scoped triggers. */
@@ -475,6 +483,11 @@ export function buildWebhookBody(
         contact_id: args.context.contact_id ?? '',
         message_id: args.context.message_id ?? '',
         message_text: args.context.message_text ?? '',
+        interactive_reply_id: args.context.interactive_reply_id ?? '',
+        interactive_reply_title: args.context.interactive_reply_title ?? '',
+        action_id: args.context.action_id ?? '',
+        button_id: args.context.button_id ?? '',
+        selected_option_id: args.context.selected_option_id ?? '',
         customer_phone: args.context.customer_phone ?? '',
         customer_name: args.context.customer_name ?? '',
         automation_mode: args.context.automation_mode ?? 'agent',
@@ -577,6 +590,8 @@ function interpolate(s: string, args: ExecuteArgs): string {
     const [ns, prop] = String(key).split('.')
     if (ns === 'message' && prop === 'text') return String(args.context.message_text ?? '')
     if (ns === 'message' && prop === 'id') return String(args.context.message_id ?? '')
+    if (ns === 'message' && prop === 'interactive_reply_id') return String(args.context.interactive_reply_id ?? '')
+    if (ns === 'message' && prop === 'interactive_reply_title') return String(args.context.interactive_reply_title ?? '')
     if (ns === 'organization' && prop === 'id') return String(args.context.organization_id ?? '')
     if (ns === 'conversation' && prop === 'id') return String(args.context.conversation_id ?? '')
     if (ns === 'contact' && prop === 'id') return String(args.context.contact_id ?? '')

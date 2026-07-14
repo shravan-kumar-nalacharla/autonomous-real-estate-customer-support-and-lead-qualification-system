@@ -65,6 +65,7 @@ export default function BroadcastsPage() {
 
   async function fetchBroadcasts() {
     try {
+      setError(null);
       const supabase = createClient();
       const { data, error: fetchError } = await supabase
         .from('broadcasts')
@@ -137,7 +138,7 @@ export default function BroadcastsPage() {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2">
         <p className="text-sm text-red-400">{error}</p>
-        <Button variant="outline" onClick={() => window.location.reload()}>
+        <Button variant="outline" onClick={fetchBroadcasts}>
           Retry
         </Button>
       </div>

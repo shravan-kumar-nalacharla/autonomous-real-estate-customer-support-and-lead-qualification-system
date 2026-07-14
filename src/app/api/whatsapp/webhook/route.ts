@@ -651,6 +651,7 @@ async function processMessage(
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
+  const inboundText = contentText ?? message.text?.body ?? ''
   await dispatchN8nEvent({
     organizationId,
     event: 'message.received',
@@ -659,11 +660,27 @@ async function processMessage(
     idempotencyKey: `whatsapp:${message.id}:message.received`,
     payload: {
       contactId: contactRecord.id,
+      contact_id: contactRecord.id,
       conversationId: conversation.id,
+      conversation_id: conversation.id,
       customerPhone: contactRecord.phone ?? '',
+      customer_phone: contactRecord.phone ?? '',
       customerName: contactRecord.name ?? '',
+      customer_name: contactRecord.name ?? '',
       messageSummary: contentText ?? `[${message.type}]`,
+      messageText: inboundText,
+      message_text: inboundText,
+      messageId: messageRecord?.id ?? '',
+      message_id: messageRecord?.id ?? '',
+      metaMessageId: message.id,
+      meta_message_id: message.id,
       contentType,
+      interactiveReplyId,
+      interactive_reply_id: interactiveReplyId ?? '',
+      interactive_reply_title: interactiveReplyId ? contentText ?? '' : '',
+      action_id: interactiveReplyId ?? '',
+      button_id: interactiveReplyId ?? '',
+      selected_option_id: interactiveReplyId ?? '',
     },
   })
 
@@ -736,7 +753,6 @@ async function processMessage(
   // message all exist before any step — including send_message — runs.
   // Fire-and-forget: a slow or failing automation must not block the
   // webhook's 200 OK response to Meta.
-  const inboundText = contentText ?? message.text?.body ?? ''
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'
@@ -766,6 +782,11 @@ async function processMessage(
           organization_id: organizationId,
           message_id: messageRecord?.id ?? '',
           message_text: inboundText,
+          interactive_reply_id: interactiveReplyId ?? '',
+          interactive_reply_title: interactiveReplyId ? contentText ?? '' : '',
+          action_id: interactiveReplyId ?? '',
+          button_id: interactiveReplyId ?? '',
+          selected_option_id: interactiveReplyId ?? '',
           conversation_id: conversation.id,
           contact_id: contactRecord.id,
           customer_phone: contactRecord.phone ?? '',

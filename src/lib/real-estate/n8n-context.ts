@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isUuid } from "@/lib/internal-secret";
+import type { ConversationMemory } from "./conversation-policy";
 import { normalizePhone, phonesMatch } from "@/lib/whatsapp/phone-utils";
 
 export interface N8nEventEnvelope {
@@ -212,4 +213,80 @@ export async function getEventDuplicateState(
     event_already_completed:
       (eventStatusResult.data as { status?: string } | null)?.status === "completed",
   };
+}
+
+export interface ConversationMemoryMessage {
+  sender_type?: string | null;
+  content_text?: string | null;
+  content_type?: string | null;
+  interactive_reply_id?: string | null;
+  raw_payload?: unknown;
+  source?: string | null;
+  created_at?: string | null;
+}
+
+export function deriveConversationMemory(
+  messages: ConversationMemoryMessage[],
+  now = new Date(),
+): ConversationMemory {
+  const sorted = [...messages].sort(
+    (a, b) =>
+      Date.parse(String(b.created_at ?? "")) - Date.parse(String(a.created_at ?? "")),
+  );
+  const lastAgent = sorted.find((message) =>
+    ["agent", "bot", "business"].includes(String(message.sender_type ?? "")),
+  );
+  const lastCustomer = sorted.find(
+    (message) => String(message.sender_type ?? "") === "customer",
+  );
+  const menuMessage = sorted.find(isWelcomeMenuMessage);
+  const menuSentAt = menuMessage?.created_at ?? null;
+  const menuAgeMs = menuSentAt
+    ? now.getTime() - Date.parse(menuSentAt)
+    : Number.POSITIVE_INFINITY;
+
+  return {
+    last_agent_message_text: lastAgent?.content_text ?? null,
+    last_agent_intent: inferAgentIntent(lastAgent),
+    last_agent_menu_sent_at: menuSentAt,
+    last_agent_menu_sent_recently:
+      Number.isFinite(menuAgeMs) && menuAgeMs >= 0 && menuAgeMs <= 10 * 60 * 1000,
+    last_customer_message_text: lastCustomer?.content_text ?? null,
+    last_customer_interactive_reply_id: lastCustomer?.interactive_reply_id ?? null,
+  };
+}
+
+function inferAgentIntent(message: ConversationMemoryMessage | undefined) {
+  if (!message) return null;
+  if (isWelcomeMenuMessage(message)) return "greeting_menu";
+  const text = String(message.content_text ?? "").toLowerCase();
+  if (text.includes("are you looking to buy")) return "menu_find_property";
+  if (text.includes("which property would you like to visit")) {
+    return "menu_book_site_visit";
+  }
+  if (text.includes("advisor will assist you shortly")) return "menu_talk_to_agent";
+  return null;
+}
+
+function isWelcomeMenuMessage(message: ConversationMemoryMessage) {
+  const text = String(message.content_text ?? "").toLowerCase();
+  if (text.includes("what are you looking for today")) return true;
+  const payload = message.raw_payload;
+  if (!payload || typeof payload !== "object") return false;
+  const buttons = (payload as { action?: { buttons?: unknown[] } }).action?.buttons;
+  if (!Array.isArray(buttons)) return false;
+  const ids = buttons
+    .map((button) =>
+      String(
+        ((button as { reply?: { id?: unknown } }).reply?.id ??
+          (button as { id?: unknown }).id ??
+          ""),
+      ),
+    )
+    .filter(Boolean);
+  return (
+    ids.includes("find_property") &&
+    ids.includes("book_site_visit") &&
+    ids.includes("talk_to_agent")
+  );
 }

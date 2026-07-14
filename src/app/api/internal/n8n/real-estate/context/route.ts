@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isInternalRequestAuthorized } from "@/lib/internal-secret";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import {
+  deriveConversationMemory,
   getEventDuplicateState,
   resolveRealEstateContext,
   type N8nEventEnvelope,
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
     recommendationsResult,
     appointmentsResult,
     handoffResult,
+    messagesResult,
     duplicateState,
   ] = await Promise.all([
     db
@@ -85,6 +87,17 @@ export async function POST(request: Request) {
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
+    conversation?.id
+      ? db
+          .from("messages")
+          .select(
+            "sender_type, content_type, content_text, interactive_reply_id, raw_payload, source, created_at",
+          )
+          .eq("organization_id", organizationId)
+          .eq("conversation_id", String(conversation.id))
+          .order("created_at", { ascending: false })
+          .limit(12)
+      : Promise.resolve({ data: [], error: null }),
     getEventDuplicateState(db, {
       organizationId,
       eventId: body.event.event_id,
@@ -95,6 +108,7 @@ export async function POST(request: Request) {
   if (organizationResult.error || !organizationResult.data) {
     return NextResponse.json({ error: "Organization not found" }, { status: 404 });
   }
+  const memory = deriveConversationMemory(messagesResult.data ?? []);
 
   return NextResponse.json({
     organization: organizationResult.data,
@@ -120,6 +134,7 @@ export async function POST(request: Request) {
     latest_lead_score: scoreResult.data,
     recent_recommendations: recommendationsResult.data ?? [],
     active_appointments: appointmentsResult.data ?? [],
+    ...memory,
     event_is_duplicate: duplicateState.event_is_duplicate,
     event_already_completed: duplicateState.event_already_completed,
   });
