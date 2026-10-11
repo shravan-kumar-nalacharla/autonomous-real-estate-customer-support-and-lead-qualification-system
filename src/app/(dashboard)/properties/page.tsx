@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { Building2, Loader2, Plus } from 'lucide-react';
+import { Building2, Loader2, Pencil, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,6 +67,7 @@ export default function PropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(initialForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   async function loadProperties() {
     setLoading(true);
@@ -89,31 +90,55 @@ export default function PropertiesPage() {
     void loadProperties();
   }, []);
 
-  async function createProperty() {
+  async function saveProperty() {
     setSaving(true);
     try {
-      const response = await fetch('/api/properties', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          bedrooms: form.bedrooms ? Number(form.bedrooms) : null,
-          price: Number(form.price),
-        }),
-      });
+      const response = await fetch(
+        editingId ? `/api/properties/${editingId}` : '/api/properties',
+        {
+          method: editingId ? 'PATCH' : 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            ...form,
+            bedrooms: form.bedrooms ? Number(form.bedrooms) : null,
+            price: Number(form.price),
+          }),
+        }
+      );
       const json = await response.json();
       if (!response.ok)
-        throw new Error(json.error ?? 'Failed to create property');
+        throw new Error(json.error ?? 'Failed to save property');
       setForm(initialForm);
+      setEditingId(null);
       await loadProperties();
-      toast.success('Property added');
+      toast.success(editingId ? 'Property updated' : 'Property added');
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : 'Failed to create property'
+        error instanceof Error ? error.message : 'Failed to save property'
       );
     } finally {
       setSaving(false);
     }
+  }
+
+  function editProperty(property: PropertyRow) {
+    setEditingId(property.id);
+    setForm({
+      title: property.title,
+      property_type: property.property_type,
+      listing_type: property.listing_type,
+      location: property.location,
+      locality: property.locality ?? '',
+      bedrooms: property.bedrooms?.toString() ?? '',
+      price: property.price.toString(),
+    });
+    document.getElementById('property-title')?.focus();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setForm(initialForm);
   }
 
   return (
@@ -152,9 +177,16 @@ export default function PropertiesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="apartment">Apartment</SelectItem>
+              <SelectItem value="highrise">High-rise</SelectItem>
               <SelectItem value="villa">Villa</SelectItem>
               <SelectItem value="plot">Plot</SelectItem>
-              <SelectItem value="commercial">Commercial</SelectItem>
+              <SelectItem value="agricultural_land">
+                Agricultural land
+              </SelectItem>
+              <SelectItem value="office">Office</SelectItem>
+              <SelectItem value="showroom">Showroom</SelectItem>
+              <SelectItem value="shop">Commercial shop</SelectItem>
+              <SelectItem value="warehouse">Warehouse</SelectItem>
             </SelectContent>
           </Select>
           <Select
@@ -201,13 +233,21 @@ export default function PropertiesPage() {
               setForm((prev) => ({ ...prev, locality: event.target.value }))
             }
           />
-          <Button onClick={createProperty} disabled={saving}>
+          {editingId && (
+            <Button variant="ghost" onClick={cancelEditing} disabled={saving}>
+              <X className="mr-2 h-4 w-4" />
+              Cancel
+            </Button>
+          )}
+          <Button onClick={saveProperty} disabled={saving}>
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : editingId ? (
+              <Pencil className="mr-2 h-4 w-4" />
             ) : (
               <Plus className="mr-2 h-4 w-4" />
             )}
-            Add
+            {editingId ? 'Update' : 'Add'}
           </Button>
         </div>
       </div>
@@ -254,7 +294,17 @@ export default function PropertiesPage() {
                         .join(', ')}
                     </p>
                   </div>
-                  <Badge>{property.status}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge>{property.status}</Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Edit ${property.title}`}
+                      onClick={() => editProperty(property)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-slate-300">
                   <span>{property.property_type}</span>
