@@ -53,22 +53,6 @@ export async function runRealEstateAgents(input: AgentInput): Promise<void> {
     confidence: intent === "unknown" ? 0.35 : 0.8,
   });
 
-  await dispatchN8nEvent({
-    organizationId: input.organizationId,
-    event: "message.received",
-    entityType: "message",
-    entityId: input.messageId,
-    idempotencyKey: `${idempotencyBase}:message.received`,
-    payload: {
-      contactId: input.contactId,
-      conversationId: input.conversationId,
-      customerPhone: input.customerPhone,
-      customerName: input.customerName,
-      intent,
-      messageSummary: summarize(input.text),
-    },
-  });
-
   const parsed = parseRequirements(input.text, intent);
   const hasRequirementUpdate = hasRequirementSignal(parsed);
   if (hasRequirementUpdate) {
