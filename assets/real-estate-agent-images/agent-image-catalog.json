@@ -1,0 +1,98 @@
+{
+  "catalog_version": 1,
+  "usage": "demo_only",
+  "disclaimer": "Representative stock imagery only. Never present these images as an available property or claim a location that is not explicitly listed.",
+  "assets": [
+    {
+      "asset_key": "demo_apartment_exterior",
+      "filename": "demo-sale-apartment-modern-exterior-01.jpg",
+      "listing_intent": "sale",
+      "property_type": "apartment",
+      "view": "exterior",
+      "tags": ["apartment", "modern", "residential", "exterior"],
+      "source_page": "https://www.pexels.com/photo/37503936/",
+      "credit": "Abdelrhman Magdy / Pexels"
+    },
+    {
+      "asset_key": "demo_apartment_interior",
+      "filename": "demo-sale-apartment-modern-interior-01.jpg",
+      "listing_intent": "sale",
+      "property_type": "apartment",
+      "view": "interior",
+      "tags": ["apartment", "modern", "residential", "living-room", "interior"],
+      "source_page": "https://www.pexels.com/photo/11296222/",
+      "credit": "Vidal Balielo Jr. / Pexels"
+    },
+    {
+      "asset_key": "demo_villa_exterior",
+      "filename": "demo-sale-villa-modern-exterior-01.jpg",
+      "listing_intent": "sale",
+      "property_type": "villa",
+      "view": "exterior",
+      "tags": ["villa", "luxury", "modern", "residential", "exterior"],
+      "source_page": "https://www.pexels.com/photo/7031594/",
+      "credit": "Max Vakhtbovych / Pexels"
+    },
+    {
+      "asset_key": "demo_villa_interior",
+      "filename": "demo-sale-villa-luxury-interior-01.jpg",
+      "listing_intent": "sale",
+      "property_type": "villa",
+      "view": "interior",
+      "tags": ["villa", "luxury", "residential", "living-room", "interior"],
+      "source_page": "https://www.pexels.com/photo/7534563/",
+      "credit": "Max Vakhtbovych / Pexels"
+    },
+    {
+      "asset_key": "demo_bengaluru_highrise",
+      "filename": "demo-sale-highrise-bengaluru-exterior-01.jpg",
+      "listing_intent": "sale",
+      "property_type": "highrise",
+      "view": "exterior",
+      "city": "Bengaluru",
+      "tags": ["highrise", "bengaluru", "urban", "exterior"],
+      "source_page": "https://www.pexels.com/photo/36665297/",
+      "credit": "Brijesh H / Pexels"
+    },
+    {
+      "asset_key": "demo_office_exterior",
+      "filename": "demo-lease-office-modern-exterior-01.jpg",
+      "listing_intent": "lease",
+      "property_type": "office",
+      "view": "exterior",
+      "tags": ["office", "commercial", "modern", "exterior"],
+      "source_page": "https://www.pexels.com/photo/4889301/",
+      "credit": "Erik Mclean / Pexels"
+    },
+    {
+      "asset_key": "demo_showroom_interior",
+      "filename": "demo-lease-showroom-modern-interior-01.jpg",
+      "listing_intent": "lease",
+      "property_type": "showroom",
+      "view": "interior",
+      "tags": ["showroom", "shop", "retail", "commercial", "interior"],
+      "source_page": "https://www.pexels.com/photo/31318437/",
+      "credit": "Daniel Mauricio Bertoli / Pexels"
+    },
+    {
+      "asset_key": "demo_warehouse_exterior",
+      "filename": "demo-lease-warehouse-modern-exterior-01.jpg",
+      "listing_intent": "lease",
+      "property_type": "warehouse",
+      "view": "exterior",
+      "tags": ["warehouse", "industrial", "commercial", "exterior"],
+      "source_page": "https://www.pexels.com/photo/8556704/",
+      "credit": "Jonathan / Pexels"
+    },
+    {
+      "asset_key": "demo_plot_road_access",
+      "filename": "demo-sale-plot-road-access-01.jpg",
+      "listing_intent": "sale",
+      "property_type": "plot",
+      "view": "road_access",
+      "tags": ["plot", "land", "road-access", "open-space"],
+      "source_page": "https://www.pexels.com/photo/8116335/",
+      "credit": "Yakup Tug / Pexels"
+    }
+  ]
+}

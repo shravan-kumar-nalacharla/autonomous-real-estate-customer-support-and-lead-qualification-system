@@ -9,7 +9,7 @@ interface WorkflowNode {
 
 const workflow = JSON.parse(
   readFileSync(
-    join(process.cwd(), 'n8n/Real Estate AI Agent - Production v14.json'),
+    join(process.cwd(), 'n8n/Real Estate AI Agent - Production v15.json'),
     'utf8'
   )
 ) as { name: string; nodes: WorkflowNode[] };
@@ -36,6 +36,40 @@ describe('production n8n workflow', () => {
     expect(source).toContain("id: 'rent'");
     expect(source).toContain("id: 'sell_lease'");
     expect(source).toContain('menuWasRecentlySent');
+  });
+
+  it('trusts deterministic button actions instead of the AI confidence score', () => {
+    const source = code('Parse & Validate Orchestrator Output');
+    const run = new Function('$input', '$', source);
+    const base = {
+      event: { interactive_reply_id: 'buy' },
+      config: {},
+      context: { lead_requirements: {} },
+      is_opt_out_request: false,
+    };
+    const result = run(
+      {
+        first: () => ({
+          json: {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    intent: 'unknown',
+                    confidence: 0,
+                    extracted: {},
+                  }),
+                },
+              },
+            ],
+          },
+        }),
+      },
+      () => ({ first: () => ({ json: base }) }),
+    ) as Array<{ json: { orchestrator: { confidence: number; requirements: { listing_intent: string } } } }>;
+
+    expect(result[0].json.orchestrator.confidence).toBe(1);
+    expect(result[0].json.orchestrator.requirements.listing_intent).toBe('buy');
   });
 
   it('always renders interactive buttons for an explicit greeting', () => {
