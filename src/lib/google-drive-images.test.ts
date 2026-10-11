@@ -87,6 +87,24 @@ describe('Google Drive image library', () => {
     ).resolves.toHaveLength(2);
   });
 
+  it('uses the curated public images when the default folder list is empty', async () => {
+    const result = await listGoogleDriveImages({
+      apiKey: 'key',
+      fetcher: async () => Response.json({ files: [] }),
+    });
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'demo-sale-villa-modern-exterior-01.jpg',
+        }),
+        expect.objectContaining({
+          name: 'demo-lease-warehouse-modern-exterior-01.jpg',
+        }),
+      ])
+    );
+  });
+
   it('downloads only images contained in the configured folder', async () => {
     const fetcher = async (input: string | URL | Request) => {
       const url = String(input);
@@ -132,6 +150,26 @@ describe('Google Drive image library', () => {
     });
 
     expect(requestedUrls).toHaveLength(1);
-    expect(requestedUrls[0]).toContain('/drive/v3/files/villa?alt=media');
+    expect(requestedUrls[0]).toContain(
+      'drive.google.com/uc?export=download&id=villa'
+    );
+  });
+
+  it('downloads a validated public image without an API key', async () => {
+    const requestedUrls: string[] = [];
+    const result = await downloadGoogleDriveImage({
+      fileId: 'villa',
+      apiKey: '',
+      allowedFiles: files,
+      fetcher: async (input) => {
+        requestedUrls.push(String(input));
+        return new Response(new Uint8Array([0xff, 0xd8, 0xff]), {
+          headers: { 'content-type': 'image/jpeg' },
+        });
+      },
+    });
+
+    expect(result.filename).toBe('demo-sale-villa-modern-exterior-01.jpg');
+    expect(requestedUrls[0]).toContain('drive.google.com/uc?export=download');
   });
 });

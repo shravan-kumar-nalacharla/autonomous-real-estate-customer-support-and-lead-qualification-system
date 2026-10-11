@@ -4,6 +4,59 @@ import type { PropertyMatch } from './real-estate/property-matching';
 export const DEFAULT_REAL_ESTATE_IMAGE_FOLDER_ID =
   '1u5IB_CugfwodO3ANLfYmBRSleYPIaSSk';
 
+const DEFAULT_REAL_ESTATE_IMAGES: GoogleDriveImage[] = [
+  {
+    id: '1mgt4ftz7-B0IlAyecugxKj-hOVDS3_o9',
+    name: 'demo-sale-villa-modern-exterior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1gHLUHtSKaovzV0mKyhKdKvccxVfugiAi',
+    name: 'demo-sale-plot-road-access-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1BSefTRo1WeQQRaXAkACZHhDQwbPx-h0v',
+    name: 'demo-sale-highrise-hyderabad-exterior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1lBWwT9bFUo065lpRryqwBOWZJpkZB-8K',
+    name: 'demo-sale-apartment-3bhk-interior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1kp1lAFvMHRnlZGaDlKkyIbxNbwz_6CL4',
+    name: 'demo-sale-apartment-2bhk-bedroom-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1MYbo8i90XcqCOWVfVONFm7X7MvYKGd1V',
+    name: 'demo-sale-agricultural-land-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1WOmRJ6GHqomhzycwCRlw0wFewe7iFWLA',
+    name: 'demo-lease-warehouse-modern-exterior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1r1-56ZCQvXSVQrkM-H8AyvpUWMnNhq6y',
+    name: 'demo-lease-showroom-modern-interior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1OjFmAAEB7ny4b_-ScKe6zPBmOwplOIqv',
+    name: 'demo-lease-office-modern-interior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+  {
+    id: '1noYyBDocdpXAU-YfsgNweB6QrQ6B73-m',
+    name: 'demo-lease-commercial-shop-exterior-01.jpg',
+    mimeType: 'image/jpeg',
+  },
+];
+
 export interface GoogleDriveImage {
   id: string;
   name: string;
@@ -37,12 +90,15 @@ export async function listGoogleDriveImages(
   } = {}
 ): Promise<GoogleDriveImage[]> {
   const apiKey = args.apiKey ?? process.env.GOOGLE_DRIVE_API_KEY;
-  if (!apiKey) return [];
-
   const folderId =
     args.folderId ??
     process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID ??
     DEFAULT_REAL_ESTATE_IMAGE_FOLDER_ID;
+  if (!apiKey) {
+    return folderId === DEFAULT_REAL_ESTATE_IMAGE_FOLDER_ID
+      ? DEFAULT_REAL_ESTATE_IMAGES
+      : [];
+  }
   const params = new URLSearchParams({
     q: `'${folderId}' in parents and trashed = false and mimeType contains 'image/'`,
     fields: 'files(id,name,mimeType,size,resourceKey)',
@@ -65,9 +121,12 @@ export async function listGoogleDriveImages(
     );
   }
 
-  return (payload.files ?? []).filter(
+  const files = (payload.files ?? []).filter(
     (file) => file.id && file.name && file.mimeType.startsWith('image/')
   );
+  return files.length || folderId !== DEFAULT_REAL_ESTATE_IMAGE_FOLDER_ID
+    ? files
+    : DEFAULT_REAL_ESTATE_IMAGES;
 }
 
 export function selectGoogleDriveImage(args: {
@@ -146,13 +205,10 @@ export async function downloadGoogleDriveImage(args: {
   allowedFiles?: GoogleDriveImage[];
   fetcher?: FetchLike;
 }) {
-  const apiKey = args.apiKey ?? process.env.GOOGLE_DRIVE_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_DRIVE_API_KEY is not configured');
-
   const files =
     args.allowedFiles ??
     (await listGoogleDriveImages({
-      apiKey,
+      apiKey: args.apiKey,
       folderId: args.folderId,
       fetcher: args.fetcher,
     }));
@@ -169,7 +225,7 @@ export async function downloadGoogleDriveImage(args: {
     );
   }
   const response = await (args.fetcher ?? fetch)(
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(allowedFile.id)}?alt=media&key=${encodeURIComponent(apiKey)}`,
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(allowedFile.id)}`,
     { headers, signal: AbortSignal.timeout(20_000) }
   );
   if (!response.ok) {
