@@ -1,40 +1,45 @@
-import { NextResponse } from "next/server";
-import { isInternalRequestAuthorized } from "@/lib/internal-secret";
-import { supabaseAdmin } from "@/lib/flows/admin-client";
-import { findPropertyMatches } from "@/lib/real-estate/property-matching";
-import { resolveRealEstateContext } from "@/lib/real-estate/n8n-context";
-import type { ParsedLeadRequirements } from "@/lib/real-estate/types";
+import { NextResponse } from 'next/server';
+import { findGoogleDriveImage } from '@/lib/google-drive-images';
+import { isInternalRequestAuthorized } from '@/lib/internal-secret';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
+import { findPropertyMatches } from '@/lib/real-estate/property-matching';
+import { resolveRealEstateContext } from '@/lib/real-estate/n8n-context';
+import type { ParsedLeadRequirements } from '@/lib/real-estate/types';
 
 export async function POST(request: Request) {
   if (!isInternalRequestAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as
-    | {
-        event_id?: string;
-        organization_id?: string;
-        conversation_id?: string;
-        contact_id?: string;
-        requirements?: ParsedLeadRequirements;
-        limit?: number;
-      }
-    | null;
-  if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = (await request.json().catch(() => null)) as {
+    event_id?: string;
+    organization_id?: string;
+    conversation_id?: string;
+    contact_id?: string;
+    requirements?: ParsedLeadRequirements;
+    limit?: number;
+  } | null;
+  if (!body)
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
 
   const db = supabaseAdmin();
   const resolved = await resolveRealEstateContext(db, body);
-  if ("error" in resolved) {
-    return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  if ('error' in resolved) {
+    return NextResponse.json(
+      { error: resolved.error },
+      { status: resolved.status }
+    );
   }
 
   const requirements =
     body.requirements ??
-    ((await db
-      .from("lead_requirements")
-      .select("*")
-      .eq("organization_id", resolved.organizationId)
-      .eq("contact_id", String(resolved.contact?.id ?? body.contact_id))
-      .maybeSingle()).data as ParsedLeadRequirements | null);
+    ((
+      await db
+        .from('lead_requirements')
+        .select('*')
+        .eq('organization_id', resolved.organizationId)
+        .eq('contact_id', String(resolved.contact?.id ?? body.contact_id))
+        .maybeSingle()
+    ).data as ParsedLeadRequirements | null);
 
   if (!requirements) {
     return NextResponse.json({ matches: [] });
@@ -47,5 +52,15 @@ export async function POST(request: Request) {
     limit: Math.min(Math.max(body.limit ?? 3, 1), 3),
   });
 
-  return NextResponse.json({ matches });
+  let image = null;
+  try {
+    image = await findGoogleDriveImage({ requirements, matches });
+  } catch (error) {
+    console.error(
+      '[property_matching] Google Drive image lookup failed:',
+      error instanceof Error ? error.message : error
+    );
+  }
+
+  return NextResponse.json({ matches, image });
 }

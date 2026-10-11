@@ -36,9 +36,18 @@ Configure Supabase, Meta WhatsApp Cloud API, and the internal n8n secrets in
 
 ## n8n real-estate agent
 
-Import `n8n/Real Estate AI Agent - Production v15.json`
+Import `n8n/Real Estate AI Agent - Production v16.json`
 into n8n. It calls five protected backend routes for context, property matching,
 plan commits, WhatsApp sends, and event completion.
+
+To send matching property images from Google Drive, enable Google Drive API,
+set `GOOGLE_DRIVE_API_KEY` and `GOOGLE_DRIVE_IMAGE_FOLDER_ID` on the app host,
+and share the image folder as **Anyone with the link - Viewer**. Image filenames
+should include searchable terms such as `apartment`, `villa`, `plot`, `office`,
+`showroom`, or `warehouse`. The default folder ID is
+`1u5IB_CugfwodO3ANLfYmBRSleYPIaSSk`.
+See [the Drive production checklist](docs/google-drive-property-images.md) for
+the exact setup and smoke test.
 
 ```text
 N8N_INBOUND_SECRET

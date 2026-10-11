@@ -1,5 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ParsedLeadRequirements } from "./types";
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ParsedLeadRequirements } from './types';
 
 export interface PropertyMatch {
   property_id: string;
@@ -28,13 +28,21 @@ export interface PublicPropertyDetails {
   price: number;
   amenities?: string[];
   description?: string | null;
+  media?: Array<
+    | string
+    | {
+        drive_file_id?: string | null;
+        filename?: string | null;
+        url?: string | null;
+      }
+  >;
 }
 
 interface PropertyRow {
   id: string;
   title: string;
   property_type: string;
-  listing_type: "sale" | "rent";
+  listing_type: 'sale' | 'rent';
   location: string;
   locality: string | null;
   bedrooms: number | null;
@@ -50,6 +58,7 @@ interface PropertyRow {
   city?: string | null;
   amenities?: string[];
   description?: string | null;
+  media?: PublicPropertyDetails['media'];
 }
 
 export async function findPropertyMatches(args: {
@@ -59,16 +68,17 @@ export async function findPropertyMatches(args: {
   limit?: number;
 }): Promise<PropertyMatch[]> {
   const { data, error } = await args.db
-    .from("properties")
+    .from('properties')
     .select(
-      "id, title, property_type, listing_type, listing_intent, property_category, property_stage, location, locality, city, bedrooms, bathrooms, area_sqft, area_min, area_max, area_unit, price, amenities, description",
+      'id, title, property_type, listing_type, listing_intent, property_category, property_stage, location, locality, city, bedrooms, bathrooms, area_sqft, area_min, area_max, area_unit, price, amenities, description, media'
     )
-    .eq("organization_id", args.organizationId)
-    .eq("status", "available")
+    .eq('organization_id', args.organizationId)
+    .eq('status', 'available')
     .limit(50);
 
   if (error || !data) {
-    if (error) console.error("[property_matching] query failed:", error.message);
+    if (error)
+      console.error('[property_matching] query failed:', error.message);
     return [];
   }
 
@@ -81,17 +91,22 @@ export async function findPropertyMatches(args: {
 
 function scoreProperty(
   property: PropertyRow,
-  requirements: ParsedLeadRequirements,
+  requirements: ParsedLeadRequirements
 ): PropertyMatch {
   let score = 0;
   const reasons: string[] = [];
 
-  if (requirements.listing_type && property.listing_type === requirements.listing_type) {
+  if (
+    requirements.listing_type &&
+    property.listing_type === requirements.listing_type
+  ) {
     score += 15;
     reasons.push(`matches ${requirements.listing_type} intent`);
   }
   const intent = normalizeIntent(requirements.listing_intent);
-  const propertyIntent = normalizeIntent(property.listing_intent ?? property.listing_type);
+  const propertyIntent = normalizeIntent(
+    property.listing_intent ?? property.listing_type
+  );
   if (intent && propertyIntent === intent) {
     score += 12;
     reasons.push(`matches ${intent} intent`);
@@ -99,8 +114,10 @@ function scoreProperty(
 
   if (
     requirements.property_category &&
-    requirements.property_category !== "unknown" &&
-    normalize(property.property_category ?? "").includes(normalize(requirements.property_category))
+    requirements.property_category !== 'unknown' &&
+    normalize(property.property_category ?? '').includes(
+      normalize(requirements.property_category)
+    )
   ) {
     score += 12;
     reasons.push(`matches ${requirements.property_category} category`);
@@ -108,16 +125,21 @@ function scoreProperty(
 
   if (
     requirements.property_type &&
-    normalize(property.property_type).includes(normalize(requirements.property_type))
+    normalize(property.property_type).includes(
+      normalize(requirements.property_type)
+    )
   ) {
     score += 20;
-    reasons.push(`matches requested property type ${requirements.property_type}`);
+    reasons.push(
+      `matches requested property type ${requirements.property_type}`
+    );
   }
 
   if (requirements.preferred_locations?.length) {
-    const haystack = `${property.location} ${property.locality ?? ""} ${property.city ?? ""}`.toLowerCase();
+    const haystack =
+      `${property.location} ${property.locality ?? ''} ${property.city ?? ''}`.toLowerCase();
     const locationHit = requirements.preferred_locations.find((location) =>
-      fuzzyIncludes(haystack, location),
+      fuzzyIncludes(haystack, location)
     );
     if (locationHit) {
       score += 25;
@@ -133,10 +155,13 @@ function scoreProperty(
 
   const min = requirements.budget_min;
   const max = requirements.budget_max;
-  if ((min == null || property.price >= min) && (max == null || property.price <= max)) {
+  if (
+    (min == null || property.price >= min) &&
+    (max == null || property.price <= max)
+  ) {
     if (min != null || max != null) {
       score += 25;
-      reasons.push("is within the stated budget range");
+      reasons.push('is within the stated budget range');
     }
   }
 
@@ -150,21 +175,25 @@ function scoreProperty(
   }
 
   if (requirements.area_min != null || requirements.area_max != null) {
-    const propertyArea = property.area_sqft ?? property.area_max ?? property.area_min;
+    const propertyArea =
+      property.area_sqft ?? property.area_max ?? property.area_min;
     if (
       propertyArea != null &&
-      (requirements.area_min == null || propertyArea >= requirements.area_min) &&
+      (requirements.area_min == null ||
+        propertyArea >= requirements.area_min) &&
       (requirements.area_max == null || propertyArea <= requirements.area_max)
     ) {
       score += 12;
-      reasons.push("matches requested area range");
+      reasons.push('matches requested area range');
     }
   }
 
   if (
     requirements.property_stage &&
-    requirements.property_stage !== "unknown" &&
-    normalize(property.property_stage ?? "").includes(normalize(requirements.property_stage))
+    requirements.property_stage !== 'unknown' &&
+    normalize(property.property_stage ?? '').includes(
+      normalize(requirements.property_stage)
+    )
   ) {
     score += 9;
     reasons.push(`matches ${requirements.property_stage} stage`);
@@ -179,13 +208,13 @@ function scoreProperty(
 }
 
 function normalize(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function normalizeIntent(value?: string | null) {
-  if (!value || value === "unknown") return null;
-  if (value === "sale") return "buy";
-  if (value === "rent") return "rent";
+  if (!value || value === 'unknown') return null;
+  if (value === 'sale') return 'buy';
+  if (value === 'rent') return 'rent';
   return value;
 }
 
@@ -218,5 +247,6 @@ function toPublicProperty(property: PropertyRow): PublicPropertyDetails {
     price: property.price,
     amenities: property.amenities ?? [],
     description: property.description ?? null,
+    media: Array.isArray(property.media) ? property.media : [],
   };
 }

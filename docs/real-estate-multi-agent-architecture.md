@@ -66,6 +66,9 @@ Property Match Agent:
 - Reads only available properties for the active organization.
 - Scores matches by listing type, property type, location/locality, bedrooms, and budget.
 - Stores up to three recommendations with reasons.
+- Selects a property-specific or representative image from the configured
+  Google Drive folder and sends it through the CRM's authenticated Meta media
+  upload path.
 
 Appointment Booking Agent:
 
@@ -157,6 +160,8 @@ Optional:
 - `N8N_WHATSAPP_FORWARD_WEBHOOK_URL`
 - `N8N_WHATSAPP_FORWARD_SECRET`
 - `N8N_INTERNAL_SECRET`
+- `GOOGLE_DRIVE_API_KEY`
+- `GOOGLE_DRIVE_IMAGE_FOLDER_ID`
 
 ## Local Development
 
