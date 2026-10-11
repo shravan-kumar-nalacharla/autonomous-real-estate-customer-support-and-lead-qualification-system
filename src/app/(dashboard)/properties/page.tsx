@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
 import { Building2, Loader2, Pencil, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -37,6 +36,30 @@ const initialForm = {
   price: '',
 };
 
+const publicDriveImageIds: Record<string, string> = {
+  apartment2: '1kp1lAFvMHRnlZGaDlKkyIbxNbwz_6CL4',
+  apartment3: '1lBWwT9bFUo065lpRryqwBOWZJpkZB-8K',
+  highrise: '1BSefTRo1WeQQRaXAkACZHhDQwbPx-h0v',
+  villa: '1mgt4ftz7-B0IlAyecugxKj-hOVDS3_o9',
+  plot: '1gHLUHtSKaovzV0mKyhKdKvccxVfugiAi',
+  agricultural_land: '1MYbo8i90XcqCOWVfVONFm7X7MvYKGd1V',
+  office: '1OjFmAAEB7ny4b_-ScKe6zPBmOwplOIqv',
+  showroom: '1r1-56ZCQvXSVQrkM-H8AyvpUWMnNhq6y',
+  shop: '1noYyBDocdpXAU-YfsgNweB6QrQ6B73-m',
+  warehouse: '1WOmRJ6GHqomhzycwCRlw0wFewe7iFWLA',
+};
+
+function propertyImageUrl(property: PropertyRow) {
+  const key =
+    property.property_type === 'apartment'
+      ? `apartment${property.bedrooms === 2 ? 2 : 3}`
+      : property.property_type;
+  const fileId = publicDriveImageIds[key];
+  return fileId
+    ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200`
+    : `/api/properties/${property.id}/image`;
+}
+
 function PropertyImage({ property }: { property: PropertyRow }) {
   const [failed, setFailed] = useState(false);
 
@@ -48,13 +71,10 @@ function PropertyImage({ property }: { property: PropertyRow }) {
           aria-label="No property image available"
         />
       ) : (
-        <Image
-          src={`/api/properties/${property.id}/image`}
+        <img
+          src={propertyImageUrl(property)}
           alt={`${property.title} property`}
-          fill
-          unoptimized
-          sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
-          className="object-cover"
+          className="absolute inset-0 h-full w-full object-cover"
           onError={() => setFailed(true)}
         />
       )}
