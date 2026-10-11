@@ -130,6 +130,7 @@ export default function PropertiesPage() {
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
         <div className="grid gap-3 md:grid-cols-7">
           <Input
+            id="property-title"
             className="md:col-span-2"
             placeholder="Property title"
             value={form.title}
@@ -219,7 +220,19 @@ export default function PropertiesPage() {
       ) : properties.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-slate-400">
           <Building2 className="mx-auto mb-3 h-8 w-8" />
-          No properties yet.
+          <p className="font-medium text-slate-300">No property records yet</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+            Google Drive stores the photos, but each listing still needs its
+            property details. Add a property above and its matching Drive image
+            will appear on the card.
+          </p>
+          <Button
+            className="mt-4"
+            onClick={() => document.getElementById('property-title')?.focus()}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add first property
+          </Button>
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

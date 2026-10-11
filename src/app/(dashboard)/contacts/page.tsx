@@ -49,6 +49,10 @@ const PAGE_SIZE = 25;
 
 interface ContactWithTags extends Contact {
   tags?: Tag[];
+  leadScore?: {
+    score: number;
+    category: string;
+  };
 }
 
 export default function ContactsPage() {
@@ -97,7 +101,9 @@ export default function ContactsPage() {
 
     if (search.trim()) {
       const term = `%${search.trim()}%`;
-      query = query.or(`name.ilike.${term},phone.ilike.${term},email.ilike.${term}`);
+      query = query.or(
+        `name.ilike.${term},phone.ilike.${term},email.ilike.${term}`
+      );
     }
 
     const { data, count, error } = await query;
@@ -118,10 +124,21 @@ export default function ContactsPage() {
 
     // Fetch tags for these contacts
     const contactIds = data.map((c) => c.id);
-    const { data: contactTags } = await supabase
-      .from('contact_tags')
-      .select('contact_id, tag_id')
-      .in('contact_id', contactIds);
+    const [contactTagsResult, leadScoresResult] = await Promise.all([
+      supabase
+        .from('contact_tags')
+        .select('contact_id, tag_id')
+        .in('contact_id', contactIds),
+      supabase
+        .from('lead_scores')
+        .select('contact_id, score, category')
+        .in('contact_id', contactIds),
+    ]);
+
+    const contactTags = contactTagsResult.data;
+    const leadScores = new Map(
+      (leadScoresResult.data ?? []).map((lead) => [lead.contact_id, lead])
+    );
 
     const tagsByContact: Record<string, string[]> = {};
     contactTags?.forEach((ct) => {
@@ -134,6 +151,7 @@ export default function ContactsPage() {
       tags: (tagsByContact[c.id] ?? [])
         .map((tid) => tagsMap[tid])
         .filter(Boolean),
+      leadScore: leadScores.get(c.id),
     }));
 
     setContacts(enriched);
@@ -208,11 +226,12 @@ export default function ContactsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Contacts</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Manage your contact list. {totalCount > 0 && `${totalCount} total contacts.`}
+          <p className="mt-1 text-sm text-slate-400">
+            Manage your contact list.{' '}
+            {totalCount > 0 && `${totalCount} total contacts.`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -236,7 +255,7 @@ export default function ContactsPage() {
 
       {/* Search */}
       <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-500" />
+        <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-slate-500" />
         <Input
           value={search}
           onChange={(e) => {
@@ -246,41 +265,56 @@ export default function ContactsPage() {
             setPage(0);
           }}
           placeholder="Search by name, phone, or email..."
-          className="pl-8 bg-slate-900 border-slate-700 text-white placeholder:text-slate-500"
+          className="border-slate-700 bg-slate-900 pl-8 text-white placeholder:text-slate-500"
         />
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-slate-800 overflow-hidden">
+      <div className="overflow-hidden rounded-lg border border-slate-800">
         <Table>
           <TableHeader>
             <TableRow className="border-slate-800 hover:bg-transparent">
               <TableHead className="text-slate-400">Name</TableHead>
               <TableHead className="text-slate-400">Phone</TableHead>
-              <TableHead className="text-slate-400 hidden md:table-cell">Email</TableHead>
-              <TableHead className="text-slate-400 hidden lg:table-cell">Company</TableHead>
-              <TableHead className="text-slate-400 hidden md:table-cell">Tags</TableHead>
-              <TableHead className="text-slate-400 hidden lg:table-cell">Created</TableHead>
-              <TableHead className="text-slate-400 w-12" />
+              <TableHead className="hidden text-slate-400 md:table-cell">
+                Email
+              </TableHead>
+              <TableHead className="hidden text-slate-400 lg:table-cell">
+                Company
+              </TableHead>
+              <TableHead className="hidden text-slate-400 md:table-cell">
+                Tags
+              </TableHead>
+              <TableHead className="hidden text-slate-400 md:table-cell">
+                Lead
+              </TableHead>
+              <TableHead className="hidden text-slate-400 lg:table-cell">
+                Created
+              </TableHead>
+              <TableHead className="w-12 text-slate-400" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow className="border-slate-800">
-                <TableCell colSpan={7} className="text-center py-12">
+                <TableCell colSpan={8} className="py-12 text-center">
                   <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="size-6 animate-spin text-primary" />
-                    <p className="text-sm text-slate-500">Loading contacts...</p>
+                    <Loader2 className="text-primary size-6 animate-spin" />
+                    <p className="text-sm text-slate-500">
+                      Loading contacts...
+                    </p>
                   </div>
                 </TableCell>
               </TableRow>
             ) : contacts.length === 0 ? (
               <TableRow className="border-slate-800">
-                <TableCell colSpan={7} className="text-center py-12">
+                <TableCell colSpan={8} className="py-12 text-center">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="size-8 text-slate-600" />
                     <p className="text-sm text-slate-500">
-                      {search ? 'No contacts match your search.' : 'No contacts yet.'}
+                      {search
+                        ? 'No contacts match your search.'
+                        : 'No contacts yet.'}
                     </p>
                     {!search && (
                       <Button
@@ -300,20 +334,24 @@ export default function ContactsPage() {
               contacts.map((contact) => (
                 <TableRow
                   key={contact.id}
-                  className="border-slate-800 hover:bg-slate-900/50 cursor-pointer"
+                  className="cursor-pointer border-slate-800 hover:bg-slate-900/50"
                   onClick={() => openDetail(contact.id)}
                 >
-                  <TableCell className="text-white font-medium">
-                    {contact.name || <span className="text-slate-500 italic">Unnamed</span>}
+                  <TableCell className="font-medium text-white">
+                    {contact.name || (
+                      <span className="text-slate-500 italic">Unnamed</span>
+                    )}
                   </TableCell>
-                  <TableCell className="text-slate-300 font-mono text-xs">
+                  <TableCell className="font-mono text-xs text-slate-300">
                     {contact.phone}
                   </TableCell>
-                  <TableCell className="text-slate-400 hidden md:table-cell text-sm">
+                  <TableCell className="hidden text-sm text-slate-400 md:table-cell">
                     {contact.email || <span className="text-slate-600">-</span>}
                   </TableCell>
-                  <TableCell className="text-slate-400 hidden lg:table-cell text-sm">
-                    {contact.company || <span className="text-slate-600">-</span>}
+                  <TableCell className="hidden text-sm text-slate-400 lg:table-cell">
+                    {contact.company || (
+                      <span className="text-slate-600">-</span>
+                    )}
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
                     <div className="flex flex-wrap gap-1">
@@ -331,7 +369,7 @@ export default function ContactsPage() {
                           </span>
                         ))
                       ) : (
-                        <span className="text-slate-600 text-xs">-</span>
+                        <span className="text-xs text-slate-600">-</span>
                       )}
                       {contact.tags && contact.tags.length > 3 && (
                         <span className="text-[10px] text-slate-500">
@@ -340,7 +378,31 @@ export default function ContactsPage() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-slate-500 text-xs hidden lg:table-cell">
+                  <TableCell className="hidden md:table-cell">
+                    {contact.leadScore ? (
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">
+                          {contact.leadScore.score}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${
+                            contact.leadScore.category === 'hot'
+                              ? 'bg-red-500/10 text-red-400'
+                              : contact.leadScore.category === 'warm'
+                                ? 'bg-amber-500/10 text-amber-400'
+                                : 'bg-sky-500/10 text-sky-400'
+                          }`}
+                        >
+                          {contact.leadScore.category.replaceAll('_', ' ')}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-600">
+                        Not qualified
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="hidden text-xs text-slate-500 lg:table-cell">
                     {new Date(contact.created_at).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
@@ -363,7 +425,7 @@ export default function ContactsPage() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent
                         align="end"
-                        className="bg-slate-900 border-slate-700"
+                        className="border-slate-700 bg-slate-900"
                       >
                         <DropdownMenuItem
                           onClick={(e) => {
@@ -400,8 +462,8 @@ export default function ContactsPage() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-slate-500">
-            Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, totalCount)} of{' '}
-            {totalCount}
+            Showing {page * PAGE_SIZE + 1}-
+            {Math.min((page + 1) * PAGE_SIZE, totalCount)} of {totalCount}
           </p>
           <div className="flex items-center gap-1">
             <Button
@@ -413,7 +475,7 @@ export default function ContactsPage() {
             >
               <ChevronLeft className="size-4" />
             </Button>
-            <span className="text-xs text-slate-400 px-2">
+            <span className="px-2 text-xs text-slate-400">
               Page {page + 1} of {totalPages}
             </span>
             <Button
@@ -458,18 +520,18 @@ export default function ContactsPage() {
 
       {/* Delete Confirmation */}
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <DialogContent className="bg-slate-900 border-slate-700 text-slate-200 sm:max-w-sm">
+        <DialogContent className="border-slate-700 bg-slate-900 text-slate-200 sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-white">Delete Contact</DialogTitle>
             <DialogDescription className="text-slate-400">
               Are you sure you want to delete{' '}
-              <span className="text-slate-200 font-medium">
+              <span className="font-medium text-slate-200">
                 {deleteTarget?.name || deleteTarget?.phone}
               </span>
               ? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="bg-slate-900 border-slate-700">
+          <DialogFooter className="border-slate-700 bg-slate-900">
             <Button
               variant="outline"
               onClick={() => setDeleteConfirmOpen(false)}
