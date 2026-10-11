@@ -79,6 +79,66 @@ describe('production n8n workflow', () => {
     expect(result[0].json.orchestrator.requirements.listing_intent).toBe('buy');
   });
 
+  it('asks for missing search details before querying property inventory', () => {
+    const source = code('Lead Qualification Agent - Score & Classify');
+    const run = new Function('$input', source);
+    const qualify = (requirements: Record<string, unknown>) =>
+      run({
+        first: () => ({
+          json: {
+            event: { message_text: 'I want a villa' },
+            config: { defaultFollowupHours: 24, hotFollowupHours: 2 },
+            context: { contact: { phone: '+919999999999' } },
+            is_opt_out_request: false,
+            orchestrator: {
+              intent: 'property_search',
+              confidence: 1,
+              requirements,
+            },
+          },
+        }),
+      }) as Array<{
+        json: {
+          qualification: {
+            can_match_properties: boolean;
+            missing_fields: string[];
+          };
+        };
+      }>;
+
+    const partial = qualify({
+      listing_intent: 'buy',
+      property_type: 'villa',
+      preferred_locations: [],
+      budget_min: null,
+      budget_max: null,
+      area_min: null,
+      area_max: null,
+    });
+    expect(partial[0].json.qualification.can_match_properties).toBe(false);
+    expect(partial[0].json.qualification.missing_fields).toEqual(
+      expect.arrayContaining(['preferred location', 'budget range'])
+    );
+
+    const reply = new Function(
+      '$input',
+      code('Appointment, Follow-up & Escalation Agents')
+    )({ first: () => ({ json: partial[0].json }) }) as Array<{
+      json: { outbound_message: { content_text: string } };
+    }>;
+    expect(reply[0].json.outbound_message.content_text).toBe(
+      'To suggest suitable properties, please share your preferred location and budget range.'
+    );
+
+    const searchable = qualify({
+      listing_intent: 'buy',
+      property_type: 'villa',
+      preferred_locations: ['Kondapur'],
+      budget_max: 20_000_000,
+    });
+    expect(searchable[0].json.qualification.can_match_properties).toBe(true);
+  });
+
   it('always renders interactive buttons for an explicit greeting', () => {
     const source = code('Appointment, Follow-up & Escalation Agents');
     expect(source).toContain("actionId === 'show_menu'");
