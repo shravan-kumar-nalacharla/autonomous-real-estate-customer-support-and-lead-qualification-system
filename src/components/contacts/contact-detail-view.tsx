@@ -254,7 +254,7 @@ export function ContactDetailView({
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loadingDeals, setLoadingDeals] = useState(false);
 
-  // Lead profile tab
+  // Lead qualification tab
   const [leadRequirement, setLeadRequirement] =
     useState<LeadRequirement | null>(null);
   const [leadScore, setLeadScore] = useState<LeadScore | null>(null);
@@ -617,7 +617,7 @@ export function ContactDetailView({
                   value="lead"
                   className="data-active:text-primary text-slate-400 data-active:bg-slate-800"
                 >
-                  Lead Profile
+                  Qualification
                 </TabsTrigger>
                 <TabsTrigger
                   value="tags"
@@ -701,7 +701,7 @@ export function ContactDetailView({
                 </div>
               </TabsContent>
 
-              {/* Lead Profile Tab */}
+              {/* Lead Qualification Tab */}
               <TabsContent
                 value="lead"
                 className="flex-1 overflow-y-auto px-4 py-3"

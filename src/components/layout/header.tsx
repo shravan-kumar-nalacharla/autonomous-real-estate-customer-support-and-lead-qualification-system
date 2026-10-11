@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useAuth } from "@/hooks/use-auth";
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useAuth } from '@/hooks/use-auth';
 import {
   Bell,
   LogOut,
@@ -10,36 +10,37 @@ import {
   Search,
   Settings as SettingsIcon,
   User,
-} from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+} from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 
 const pageTitles: Record<string, string> = {
-  "/agents": "AI Agent Team",
-  "/dashboard": "Analytics",
-  "/inbox": "Inbox",
-  "/contacts": "Contacts",
-  "/pipelines": "Pipeline",
-  "/broadcasts": "Broadcasts",
-  "/automations": "Automations",
-  "/flows": "Flows",
-  "/n8n-workflows": "n8n Workflows",
-  "/settings": "Settings",
+  '/agents': 'AI Agent Team',
+  '/dashboard': 'Analytics',
+  '/inbox': 'Inbox',
+  '/contacts': 'Contacts',
+  '/lead-qualification': 'Lead Qualification',
+  '/pipelines': 'Pipeline',
+  '/broadcasts': 'Broadcasts',
+  '/automations': 'Automations',
+  '/flows': 'Flows',
+  '/n8n-workflows': 'n8n Workflows',
+  '/settings': 'Settings',
 };
 
 function getPageTitle(pathname: string): string {
   if (pageTitles[pathname]) return pageTitles[pathname];
   const match = Object.entries(pageTitles).find(([path]) =>
-    pathname.startsWith(path),
+    pathname.startsWith(path)
   );
-  return match ? match[1] : "Analytics";
+  return match ? match[1] : 'Analytics';
 }
 
 interface HeaderProps {
@@ -54,7 +55,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   const initial =
     profile?.full_name?.charAt(0)?.toUpperCase() ??
     profile?.email?.charAt(0)?.toUpperCase() ??
-    "U";
+    'U';
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 lg:px-6">
@@ -74,7 +75,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
 
       <div className="flex items-center gap-2 sm:gap-3">
         <div className="relative hidden w-56 md:block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
+          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
           <Input
             placeholder="Search"
             className="h-9 rounded-[var(--radius-md)] border-[var(--border)] bg-[var(--bg-surface)] pl-9 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
@@ -91,14 +92,14 @@ export function Header({ onOpenSidebar }: HeaderProps) {
 
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="flex items-center gap-2 rounded-[var(--radius-md)] px-1 py-1 transition-colors hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-hover)] focus:outline-none data-popup-open:bg-[var(--bg-hover)] sm:gap-3 sm:pl-1 sm:pr-3"
+            className="flex items-center gap-2 rounded-[var(--radius-md)] px-1 py-1 transition-colors hover:bg-[var(--bg-hover)] focus:bg-[var(--bg-hover)] focus:outline-none data-popup-open:bg-[var(--bg-hover)] sm:gap-3 sm:pr-3 sm:pl-1"
             aria-label="Open account menu"
           >
             <Avatar className="size-8">
               {profile?.avatar_url ? (
                 <AvatarImage
                   src={profile.avatar_url}
-                  alt={profile.full_name ?? "Avatar"}
+                  alt={profile.full_name ?? 'Avatar'}
                 />
               ) : null}
               <AvatarFallback className="bg-[var(--accent-light)] text-sm font-medium text-[var(--accent)]">
@@ -106,7 +107,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               </AvatarFallback>
             </Avatar>
             <span className="hidden text-sm font-medium text-[var(--text-primary)] sm:inline">
-              {profile?.full_name ?? "User"}
+              {profile?.full_name ?? 'User'}
             </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -116,10 +117,10 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           >
             <div className="px-2 py-1.5">
               <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                {profile?.full_name ?? "User"}
+                {profile?.full_name ?? 'User'}
               </p>
               <p className="truncate text-xs text-[var(--text-tertiary)]">
-                {profile?.email ?? ""}
+                {profile?.email ?? ''}
               </p>
             </div>
             <DropdownMenuSeparator className="bg-[var(--border)]" />
