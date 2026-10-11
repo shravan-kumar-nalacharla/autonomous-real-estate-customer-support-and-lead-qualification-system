@@ -55,6 +55,21 @@ describe('Google Drive image library', () => {
     ).toMatchObject({ file_id: 'apartment', kind: 'listing' });
   });
 
+  it('selects a representative interior for a bedroom-only image request', () => {
+    const result = selectGoogleDriveImage({
+      files: [
+        { id: 'bed-1', name: 'bedroom 1.jpg', mimeType: 'image/jpeg' },
+        { id: 'bed-2', name: 'bedroom 2.jpg', mimeType: 'image/jpeg' },
+      ],
+      requirements: { bedrooms: 2 },
+    });
+
+    expect(result).toMatchObject({
+      file_id: 'bed-2',
+      kind: 'representative',
+    });
+  });
+
   it('lists only image files from the configured folder', async () => {
     const fetcher = async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -98,5 +113,25 @@ describe('Google Drive image library', () => {
         fetcher,
       })
     ).rejects.toThrow('not in the configured folder');
+  });
+
+  it('reuses an already-validated folder listing when downloading', async () => {
+    const requestedUrls: string[] = [];
+    const fetcher = async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response(new Uint8Array([0xff, 0xd8, 0xff]), {
+        headers: { 'content-type': 'image/jpeg' },
+      });
+    };
+
+    await downloadGoogleDriveImage({
+      fileId: 'villa',
+      apiKey: 'key',
+      allowedFiles: files,
+      fetcher,
+    });
+
+    expect(requestedUrls).toHaveLength(1);
+    expect(requestedUrls[0]).toContain('/drive/v3/files/villa?alt=media');
   });
 });

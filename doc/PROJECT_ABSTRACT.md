@@ -17,7 +17,7 @@ The project demonstrates how a real estate business can reduce manual effort, im
 - Organization and member model with roles: owner, admin, manager, agent.
 - Organization-scoped n8n workflows and settings with masked API responses.
 - Real-estate property inventory and appointment dashboard pages.
-- Lead requirement capture, deterministic scoring, and category assignment.
+- Lead requirement capture, deterministic scoring, category assignment, and a complete lead profile in the contact details view.
 - Property recommendation records based on budget, location, type, BHK, listing type, and availability.
 - Human handoff and agent activity audit records.
 - Durable n8n event outbox and secured cron delivery endpoint.
@@ -27,5 +27,4 @@ The project demonstrates how a real estate business can reduce manual effort, im
 
 - Calendar integration is intentionally deferred; appointments are managed internally first.
 - The deterministic parser handles common WhatsApp phrasing but is not a full natural-language understanding engine.
-- Existing contact detail pages are not fully redesigned; new lead data is persisted and available for focused dashboard expansion.
 - Production Supabase deployments should apply the forward migration and then re-create any quarantined legacy n8n workflows under the correct organization.

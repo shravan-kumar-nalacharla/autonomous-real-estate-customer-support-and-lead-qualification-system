@@ -94,6 +94,9 @@ export function selectGoogleDriveImage(args: {
   const bedrooms =
     args.requirements.bedrooms ?? args.requirements.bedroom_count;
   const aliases = propertyAliases(propertyType);
+  if (!aliases.length && bedrooms) {
+    aliases.push('bedroom', 'livingroom', 'kitchen');
+  }
 
   const ranked = args.files
     .map((file) => {
@@ -104,7 +107,11 @@ export function selectGoogleDriveImage(args: {
       );
       if (listingIntent && name.includes(normalizeListingIntent(listingIntent)))
         score += 3;
-      if (bedrooms && name.includes(`${bedrooms}bhk`)) score += 6;
+      if (
+        bedrooms &&
+        (name.includes(`${bedrooms}bhk`) || name.includes(`bedroom${bedrooms}`))
+      )
+        score += 6;
       if (name.includes('exterior')) score += 1;
       return { file, score };
     })
@@ -136,16 +143,19 @@ export async function downloadGoogleDriveImage(args: {
   resourceKey?: string | null;
   apiKey?: string;
   folderId?: string;
+  allowedFiles?: GoogleDriveImage[];
   fetcher?: FetchLike;
 }) {
   const apiKey = args.apiKey ?? process.env.GOOGLE_DRIVE_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_DRIVE_API_KEY is not configured');
 
-  const files = await listGoogleDriveImages({
-    apiKey,
-    folderId: args.folderId,
-    fetcher: args.fetcher,
-  });
+  const files =
+    args.allowedFiles ??
+    (await listGoogleDriveImages({
+      apiKey,
+      folderId: args.folderId,
+      fetcher: args.fetcher,
+    }));
   const allowedFile = files.find((file) => file.id === args.fileId);
   if (!allowedFile)
     throw new Error('Google Drive image is not in the configured folder');
