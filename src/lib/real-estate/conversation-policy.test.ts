@@ -6,7 +6,7 @@ import {
 } from "./conversation-policy";
 
 describe("real-estate conversation policy", () => {
-  it("sends the welcome menu only when a greeting has no recent menu", () => {
+  it("always sends the interactive welcome menu for an explicit greeting", () => {
     const first = buildRealEstateConversationReply({
       agencyName: "Huygen Realty",
       messageText: "Hi",
@@ -29,9 +29,8 @@ describe("real-estate conversation policy", () => {
       memory: { last_agent_menu_sent_recently: true },
     });
 
-    expect(repeat.messageType).toBe("text");
-    expect(repeat.reply).toContain("please choose one of the options above");
-    expect(repeat.buttons).toHaveLength(0);
+    expect(repeat.messageType).toBe("interactive");
+    expect(repeat.buttons).toHaveLength(3);
   });
 
   it("turns Find Property button taps into the next qualification question", () => {

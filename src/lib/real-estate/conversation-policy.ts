@@ -94,16 +94,6 @@ export function buildRealEstateConversationReply(
   const propertyMatches = input.propertyMatches ?? [];
 
   if (intent === "greeting") {
-    if (input.memory?.last_agent_menu_sent_recently) {
-      return {
-        intent,
-        messageType: "text",
-        reply:
-          "Sure - please choose one of the options above, or tell me what you need, for example: \"200 sq yd plot in Hyderabad under 80 lakh\".",
-        buttons: [],
-        requiresHuman: false,
-      };
-    }
     return {
       intent,
       messageType: "interactive",

@@ -36,7 +36,7 @@ Configure Supabase, Meta WhatsApp Cloud API, and the internal n8n secrets in
 
 ## n8n real-estate agent
 
-Import `n8n/Real Estate AI Agent - Production v13.json`
+Import `n8n/Real Estate AI Agent - Production v14.json`
 into n8n. It calls five protected backend routes for context, property matching,
 plan commits, WhatsApp sends, and event completion.
 
