@@ -37,13 +37,14 @@ API isolation:
 - The server resolves the authenticated user and active organization.
 - Browsers never send trusted organization IDs for protected writes.
 
-## Multi-Agent Workflow
+## Five-Agent Workflow
 
-The system uses deterministic agents in `src/lib/real-estate/agents.ts`.
+The system uses five deterministic, specialized agents in `src/lib/real-estate/agents.ts`.
 
-Conversation Orchestrator:
+Concierge Agent:
 
-- Runs after a WhatsApp inbound message is persisted.
+- Reads each inbound WhatsApp message and identifies the customer's intent.
+- Routes the enquiry to the appropriate specialist agent.
 - Uses the Meta message ID as an idempotency key.
 - Skips automation when a conversation is human-owned.
 - Logs intent, reason, confidence, and output summary.
@@ -60,28 +61,59 @@ Lead Qualification Agent:
   - verified contact: 10
 - Categories are `hot`, `warm`, `cold`, and `general_enquiry`.
 
-Property Matching Agent:
+Property Match Agent:
 
 - Reads only available properties for the active organization.
 - Scores matches by listing type, property type, location/locality, bedrooms, and budget.
 - Stores up to three recommendations with reasons.
 
-Appointment Agent:
+Appointment Booking Agent:
 
-- Creates requested appointments when customers ask for a site visit.
+- Handles requests to visit a property and creates the appointment request.
+- Records the customer's preferred appointment date and time.
 - Does not claim confirmation until a human confirms.
-- Creates a follow-up task for confirmation.
-
-Follow-up Agent:
-
-- Creates internal tasks for incomplete qualification and pending appointment work.
+- Creates follow-up tasks until the appointment is confirmed.
 - The current implementation stores task state internally; scheduled reminders can be connected through n8n.
 
-Human Escalation Agent:
+Human Handoff Agent:
 
 - Escalates hot leads, sensitive topics, legal/loan/negotiation requests, unknown intents, and explicit human-support requests.
 - Assigns the least-loaded eligible member when possible.
 - Sets `automation_mode = human` on the conversation.
+
+The live command center at `/agents` reads the organization-scoped `agent_activity_logs` audit trail and displays each agent's recent runs, confidence, last action, and cross-agent flow.
+
+### Five-Agent Architecture
+
+```mermaid
+flowchart TB
+  subgraph Entry["Customer Channel"]
+    direction LR
+    Customer["Customer on WhatsApp"] --> WhatsApp["Meta WhatsApp Cloud API"] --> Webhook["Next.js Webhook"]
+  end
+
+  subgraph Team["Five-Agent Collaboration Layer"]
+    direction LR
+    Concierge["1. Concierge Agent<br/>Understand intent and route enquiry"]
+    Qualifier["2. Lead Qualification Agent<br/>Capture requirements and score lead"]
+    Matcher["3. Property Match Agent<br/>Search and rank matching properties"]
+    Booking["4. Appointment Booking Agent<br/>Book visits and create follow-ups"]
+    Handoff["5. Human Handoff Agent<br/>Escalate sensitive or valuable leads"]
+
+    Concierge --> Qualifier --> Matcher --> Booking
+    Concierge -. "human requested / sensitive" .-> Handoff
+    Qualifier -. "hot lead" .-> Handoff
+    Booking -. "confirmation required" .-> Handoff
+  end
+
+  Webhook --> Concierge
+  Data[("Organization-Scoped Supabase CRM<br/>Requirements and lead scores<br/>Property inventory and recommendations<br/>Appointments, follow-ups, and activity logs")]
+  Qualifier & Matcher & Booking <--> Data
+  Concierge & Handoff --> Data
+
+  Handoff --> Inbox["CRM Inbox"] --> Employee["Human Sales Agent"]
+  Data --> Dashboard["AI Agent Team Dashboard"]
+```
 
 ## n8n Event Dispatch
 

@@ -5,6 +5,7 @@ describe("proxy protected route coverage", () => {
   it("includes the real-estate and workflow dashboard routes", () => {
     expect(PROTECTED_PAGE_PREFIXES).toEqual(
       expect.arrayContaining([
+        "/agents",
         "/flows",
         "/n8n-workflows",
         "/properties",

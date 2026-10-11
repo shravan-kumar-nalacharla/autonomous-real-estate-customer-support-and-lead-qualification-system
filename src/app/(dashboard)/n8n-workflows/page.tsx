@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { formatDistanceToNow } from 'date-fns';
 import {
   ChevronDown,
   ChevronRight,
@@ -17,14 +17,26 @@ import {
   Unplug,
   Workflow,
   Zap,
-} from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   DEFAULT_N8N_INSTANCE_URL,
   DEFAULT_SETTINGS,
@@ -32,23 +44,23 @@ import {
   type N8nEvent,
   type SafeN8nSettingsRecord,
   type SafeN8nWorkflowRecord,
-} from "@/lib/n8n-types";
+} from '@/lib/n8n-types';
 
 const EVENT_OPTIONS: Array<{ label: string; value: N8nEvent }> = [
-  { label: "Message Received", value: "message.received" },
-  { label: "Message Sent", value: "message.sent" },
-  { label: "Contact Created", value: "contact.created" },
-  { label: "Contact Updated", value: "contact.updated" },
-  { label: "Lead Updated", value: "lead.requirements_updated" },
-  { label: "Lead Became Hot", value: "lead.hot" },
-  { label: "Property Recommended", value: "property.recommendation_created" },
-  { label: "Appointment Requested", value: "appointment.requested" },
-  { label: "Follow-up Created", value: "followup.created" },
-  { label: "Human Escalation", value: "human_escalation.created" },
-  { label: "Deal Created", value: "deal.created" },
-  { label: "Deal Stage Changed", value: "deal.stage_changed" },
-  { label: "Broadcast Completed", value: "broadcast.completed" },
-  { label: "Manual / Custom", value: "manual" },
+  { label: 'Message Received', value: 'message.received' },
+  { label: 'Message Sent', value: 'message.sent' },
+  { label: 'Contact Created', value: 'contact.created' },
+  { label: 'Contact Updated', value: 'contact.updated' },
+  { label: 'Lead Updated', value: 'lead.requirements_updated' },
+  { label: 'Lead Became Hot', value: 'lead.hot' },
+  { label: 'Property Recommended', value: 'property.recommendation_created' },
+  { label: 'Appointment Requested', value: 'appointment.requested' },
+  { label: 'Follow-up Created', value: 'followup.created' },
+  { label: 'Human Escalation', value: 'human_escalation.created' },
+  { label: 'Deal Created', value: 'deal.created' },
+  { label: 'Deal Stage Changed', value: 'deal.stage_changed' },
+  { label: 'Broadcast Completed', value: 'broadcast.completed' },
+  { label: 'Manual / Custom', value: 'manual' },
 ];
 
 interface WorkflowFormState {
@@ -61,11 +73,11 @@ interface WorkflowFormState {
 }
 
 const DEFAULT_FORM_STATE: WorkflowFormState = {
-  name: "",
-  description: "",
-  trigger_event: "message.received",
-  webhook_url: "",
-  secret_token: "",
+  name: '',
+  description: '',
+  trigger_event: 'message.received',
+  webhook_url: '',
+  secret_token: '',
   is_active: true,
 };
 
@@ -75,19 +87,21 @@ function truncateWebhook(url: string, max = 50) {
 }
 
 function formatLastRun(workflow: SafeN8nWorkflowRecord) {
-  if (!workflow.last_triggered_at) return "Never run";
+  if (!workflow.last_triggered_at) return 'Never run';
   const ago = formatDistanceToNow(new Date(workflow.last_triggered_at), {
     addSuffix: true,
   });
-  const status = workflow.last_status_code ? `HTTP ${workflow.last_status_code}` : "Timeout";
+  const status = workflow.last_status_code
+    ? `HTTP ${workflow.last_status_code}`
+    : 'Timeout';
   const count = workflow.execution_count ?? 0;
-  return `Last run: ${ago} · ${status} · ${count} execution${count === 1 ? "" : "s"}`;
+  return `Last run: ${ago} · ${status} · ${count} execution${count === 1 ? '' : 's'}`;
 }
 
 function getStatusDotClass(statusCode: number | null) {
-  if (!statusCode) return "bg-[var(--text-tertiary)]";
-  if (statusCode >= 200 && statusCode < 300) return "bg-[var(--success)]";
-  return "bg-[var(--error)]";
+  if (!statusCode) return 'bg-[var(--text-tertiary)]';
+  if (statusCode >= 200 && statusCode < 300) return 'bg-[var(--success)]';
+  return 'bg-[var(--error)]';
 }
 
 function isValidUrl(value: string) {
@@ -100,7 +114,7 @@ function isValidUrl(value: string) {
 }
 
 function normalizeUrl(value: string) {
-  return value.trim().replace(/\/+$/, "");
+  return value.trim().replace(/\/+$/, '');
 }
 
 export default function N8nWorkflowsPage() {
@@ -117,8 +131,10 @@ export default function N8nWorkflowsPage() {
   const [showPreloadedBanner, setShowPreloadedBanner] = useState(false);
 
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [editingWorkflow, setEditingWorkflow] = useState<SafeN8nWorkflowRecord | null>(null);
-  const [formState, setFormState] = useState<WorkflowFormState>(DEFAULT_FORM_STATE);
+  const [editingWorkflow, setEditingWorkflow] =
+    useState<SafeN8nWorkflowRecord | null>(null);
+  const [formState, setFormState] =
+    useState<WorkflowFormState>(DEFAULT_FORM_STATE);
   const [showSecret, setShowSecret] = useState(false);
 
   const [editingUrl, setEditingUrl] = useState(false);
@@ -126,20 +142,24 @@ export default function N8nWorkflowsPage() {
 
   const activeCount = useMemo(
     () => workflows.filter((workflow) => workflow.is_active).length,
-    [workflows],
+    [workflows]
   );
 
   const fetchSettings = useCallback(async () => {
-    const response = await fetch("/api/n8n/settings", { cache: "no-store" });
+    const response = await fetch('/api/n8n/settings', { cache: 'no-store' });
     if (!response.ok) return null;
-    const json = (await response.json()) as { settings?: SafeN8nSettingsRecord | null };
+    const json = (await response.json()) as {
+      settings?: SafeN8nSettingsRecord | null;
+    };
     return json.settings ?? null;
   }, []);
 
   const fetchWorkflows = useCallback(async () => {
-    const response = await fetch("/api/n8n/workflows", { cache: "no-store" });
+    const response = await fetch('/api/n8n/workflows', { cache: 'no-store' });
     if (!response.ok) return [] as SafeN8nWorkflowRecord[];
-    const json = (await response.json()) as { workflows?: SafeN8nWorkflowRecord[] };
+    const json = (await response.json()) as {
+      workflows?: SafeN8nWorkflowRecord[];
+    };
     return json.workflows ?? [];
   }, []);
 
@@ -153,9 +173,9 @@ export default function N8nWorkflowsPage() {
 
       let nextSettings = fetchedSettings;
       if (!nextSettings) {
-        const createSettingsResponse = await fetch("/api/n8n/settings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const createSettingsResponse = await fetch('/api/n8n/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(DEFAULT_SETTINGS),
         });
         if (createSettingsResponse.ok) {
@@ -175,9 +195,9 @@ export default function N8nWorkflowsPage() {
       let nextWorkflows = fetchedWorkflows;
       if (nextWorkflows.length === 0 && !preseededRef.current) {
         preseededRef.current = true;
-        const preseedResponse = await fetch("/api/n8n/workflows", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const preseedResponse = await fetch('/api/n8n/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(DEFAULT_WORKFLOW),
         });
         if (preseedResponse.ok) {
@@ -194,7 +214,7 @@ export default function N8nWorkflowsPage() {
       setSettings(nextSettings);
       setWorkflows(nextWorkflows);
     } catch {
-      toast.error("Failed to load n8n workflows");
+      toast.error('Failed to load n8n workflows');
     } finally {
       setLoading(false);
     }
@@ -218,10 +238,10 @@ export default function N8nWorkflowsPage() {
     setEditingWorkflow(workflow);
     setFormState({
       name: workflow.name,
-      description: workflow.description ?? "",
+      description: workflow.description ?? '',
       trigger_event: workflow.trigger_event,
-      webhook_url: "",
-      secret_token: "",
+      webhook_url: '',
+      secret_token: '',
       is_active: workflow.is_active,
     });
     setShowSecret(false);
@@ -233,11 +253,11 @@ export default function N8nWorkflowsPage() {
     const trimmedWebhook = formState.webhook_url.trim();
 
     if (!trimmedName) {
-      toast.error("Name is required");
+      toast.error('Name is required');
       return;
     }
     if (!editingWorkflow && !isValidUrl(trimmedWebhook)) {
-      toast.error("Webhook URL must be valid");
+      toast.error('Webhook URL must be valid');
       return;
     }
 
@@ -258,19 +278,19 @@ export default function N8nWorkflowsPage() {
       const response = await fetch(
         editingWorkflow
           ? `/api/n8n/workflows/${editingWorkflow.id}`
-          : "/api/n8n/workflows",
+          : '/api/n8n/workflows',
         {
-          method: editingWorkflow ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
+          method: editingWorkflow ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-        },
+        }
       );
 
       if (!response.ok) {
-        const json = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(json?.error || "Failed to save workflow");
+        const json = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(json?.error || 'Failed to save workflow');
       }
 
       const json = (await response.json()) as {
@@ -281,7 +301,7 @@ export default function N8nWorkflowsPage() {
         setWorkflows((prev) => {
           if (editingWorkflow) {
             return prev.map((workflow) =>
-              workflow.id === savedWorkflow.id ? savedWorkflow : workflow,
+              workflow.id === savedWorkflow.id ? savedWorkflow : workflow
             );
           }
           return [savedWorkflow, ...prev];
@@ -291,9 +311,9 @@ export default function N8nWorkflowsPage() {
       }
 
       setSheetOpen(false);
-      toast.success("Workflow saved");
+      toast.success('Workflow saved');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save");
+      toast.error(error instanceof Error ? error.message : 'Failed to save');
     } finally {
       setSavingWorkflow(false);
     }
@@ -306,28 +326,30 @@ export default function N8nWorkflowsPage() {
       prev.map((workflow) =>
         workflow.id === workflowId
           ? { ...workflow, is_active: nextActive }
-          : workflow,
-      ),
+          : workflow
+      )
     );
 
     try {
       const response = await fetch(`/api/n8n/workflows/${workflowId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: nextActive }),
       });
-      if (!response.ok) throw new Error("Failed to update workflow");
-      const json = (await response.json()) as { workflow?: SafeN8nWorkflowRecord };
+      if (!response.ok) throw new Error('Failed to update workflow');
+      const json = (await response.json()) as {
+        workflow?: SafeN8nWorkflowRecord;
+      };
       if (json.workflow) {
         setWorkflows((prev) =>
           prev.map((workflow) =>
-            workflow.id === workflowId ? json.workflow! : workflow,
-          ),
+            workflow.id === workflowId ? json.workflow! : workflow
+          )
         );
       }
     } catch {
       setWorkflows(previous);
-      toast.error("Failed to update workflow toggle");
+      toast.error('Failed to update workflow toggle');
     } finally {
       setToggleLoadingId(null);
     }
@@ -337,11 +359,13 @@ export default function N8nWorkflowsPage() {
     setTestLoadingId(workflowId);
     try {
       const response = await fetch(`/api/n8n/workflows/${workflowId}/test`, {
-        method: "POST",
+        method: 'POST',
       });
-      const json = (await response.json().catch(() => null)) as
-        | { success?: boolean; status?: number; message?: string }
-        | null;
+      const json = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        status?: number;
+        message?: string;
+      } | null;
       const status = json?.status ?? 0;
       const message = json?.message ?? `n8n returned ${status}`;
 
@@ -355,8 +379,8 @@ export default function N8nWorkflowsPage() {
                 last_error: response.ok ? null : message,
                 execution_count: (workflow.execution_count ?? 0) + 1,
               }
-            : workflow,
-        ),
+            : workflow
+        )
       );
 
       if (response.ok) {
@@ -365,26 +389,28 @@ export default function N8nWorkflowsPage() {
         toast.error(`n8n returned ${status}`);
       }
     } catch {
-      toast.error("Failed to test workflow");
+      toast.error('Failed to test workflow');
     } finally {
       setTestLoadingId(null);
     }
   }
 
   async function deleteWorkflow(workflowId: string) {
-    const confirmed = window.confirm("Delete this workflow?");
+    const confirmed = window.confirm('Delete this workflow?');
     if (!confirmed) return;
 
     setDeleteLoadingId(workflowId);
     try {
       const response = await fetch(`/api/n8n/workflows/${workflowId}`, {
-        method: "DELETE",
+        method: 'DELETE',
       });
       if (!response.ok) throw new Error();
-      setWorkflows((prev) => prev.filter((workflow) => workflow.id !== workflowId));
-      toast.success("Workflow deleted");
+      setWorkflows((prev) =>
+        prev.filter((workflow) => workflow.id !== workflowId)
+      );
+      toast.success('Workflow deleted');
     } catch {
-      toast.error("Failed to delete");
+      toast.error('Failed to delete');
     } finally {
       setDeleteLoadingId(null);
     }
@@ -393,50 +419,54 @@ export default function N8nWorkflowsPage() {
   async function saveInstanceUrl() {
     const normalized = normalizeUrl(urlDraft);
     if (!isValidUrl(normalized)) {
-      toast.error("Instance URL must be valid");
+      toast.error('Instance URL must be valid');
       return;
     }
 
     try {
-      const response = await fetch("/api/n8n/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch('/api/n8n/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instance_url: normalized }),
       });
       if (!response.ok) throw new Error();
-      const json = (await response.json()) as { settings?: SafeN8nSettingsRecord };
+      const json = (await response.json()) as {
+        settings?: SafeN8nSettingsRecord;
+      };
       setSettings((prev) =>
         json.settings
           ? { ...prev, ...json.settings }
-          : ({ ...prev, instance_url: normalized } as SafeN8nSettingsRecord),
+          : ({ ...prev, instance_url: normalized } as SafeN8nSettingsRecord)
       );
       setUrlDraft(normalized);
       setEditingUrl(false);
-      toast.success("Instance URL updated");
+      toast.success('Instance URL updated');
     } catch {
-      toast.error("Failed to update instance URL");
+      toast.error('Failed to update instance URL');
     }
   }
 
   async function testConnection() {
     setTestingConnection(true);
     try {
-      const response = await fetch("/api/n8n/settings/ping", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch('/api/n8n/settings/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instance_url: normalizeUrl(urlDraft || DEFAULT_N8N_INSTANCE_URL),
         }),
       });
-      const json = (await response.json().catch(() => null)) as
-        | { connected?: boolean; status?: number; instance_url?: string }
-        | null;
+      const json = (await response.json().catch(() => null)) as {
+        connected?: boolean;
+        status?: number;
+        instance_url?: string;
+      } | null;
       const connected = Boolean(json?.connected);
       const status = json?.status ?? 0;
       const nextInstanceUrl = json?.instance_url ?? normalizeUrl(urlDraft);
 
       setSettings((prev) => ({
-        id: prev?.id ?? "temporary",
+        id: prev?.id ?? 'temporary',
         instance_url: nextInstanceUrl,
         hasApiKeyConfigured: prev?.hasApiKeyConfigured ?? false,
         is_connected: connected,
@@ -449,10 +479,10 @@ export default function N8nWorkflowsPage() {
       if (connected) {
         toast.success(`Connected - ${status}`);
       } else {
-        toast.error(`Unreachable - ${status || "timeout"}`);
+        toast.error(`Unreachable - ${status || 'timeout'}`);
       }
     } catch {
-      toast.error("Connection test failed");
+      toast.error('Connection test failed');
     } finally {
       setTestingConnection(false);
     }
@@ -484,7 +514,7 @@ export default function N8nWorkflowsPage() {
             n8n Workflows
           </h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Connect your n8n automation instance to Huygen Warp events.
+            Connect n8n to Real Estate AI Agent events.
           </p>
         </div>
         <Button onClick={openCreateModal} className="gap-1.5">
@@ -503,11 +533,11 @@ export default function N8nWorkflowsPage() {
       <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-sm)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
+            <p className="text-xs font-medium tracking-[0.04em] text-[var(--text-tertiary)] uppercase">
               n8n Connection
             </p>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Instance:{" "}
+              Instance:{' '}
               <span className="font-medium text-[var(--text-primary)]">
                 {settings?.instance_url || DEFAULT_N8N_INSTANCE_URL}
               </span>
@@ -532,7 +562,7 @@ export default function N8nWorkflowsPage() {
                 onClick={() => {
                   setEditingUrl(false);
                   setUrlDraft(
-                    settings?.instance_url || DEFAULT_N8N_INSTANCE_URL,
+                    settings?.instance_url || DEFAULT_N8N_INSTANCE_URL
                   );
                 }}
               >
@@ -581,7 +611,7 @@ export default function N8nWorkflowsPage() {
           <div className="space-y-3 border-t border-[var(--border)] px-5 py-4 text-sm text-[var(--text-secondary)]">
             <p>
               n8n is an open-source automation platform. When events happen in
-              Huygen Warp (new message, new contact, deal update), your n8n
+              Real Estate AI Agent (new message, new contact, deal update), your n8n
               workflows are triggered automatically via webhooks in real time.
             </p>
             <p>How to add a workflow:</p>
@@ -589,10 +619,12 @@ export default function N8nWorkflowsPage() {
               <li>In n8n, create a Webhook node and copy the webhook URL.</li>
               <li>Click Add Workflow above.</li>
               <li>Paste the URL, choose the trigger event, then save.</li>
-              <li>Huygen Warp will post event payloads to that webhook.</li>
+              <li>
+                Real Estate AI Agent will post event payloads to that webhook.
+              </li>
             </ol>
             <pre className="overflow-x-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] p-3 text-xs text-[var(--text-primary)]">
-{`{
+              {`{
   "event": "message.received",
   "payload": { "customerPhone": "...", "message": "..." },
   "timestamp": "2025-01-01T00:00:00.000Z",
@@ -653,7 +685,7 @@ export default function N8nWorkflowsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className={`h-2.5 w-2.5 rounded-full ${workflow.is_active ? "bg-[var(--success)]" : "bg-[var(--text-tertiary)]"}`}
+                          className={`h-2.5 w-2.5 rounded-full ${workflow.is_active ? 'bg-[var(--success)]' : 'bg-[var(--text-tertiary)]'}`}
                         />
                         <h3 className="truncate text-sm font-semibold text-[var(--text-primary)]">
                           {workflow.name}
@@ -686,19 +718,21 @@ export default function N8nWorkflowsPage() {
                           toggleWorkflow(workflow.id, !workflow.is_active)
                         }
                         disabled={isToggling}
-                        aria-label={workflow.is_active ? "Turn off" : "Turn on"}
+                        aria-label={workflow.is_active ? 'Turn off' : 'Turn on'}
                         className={`relative inline-flex h-7 w-14 items-center rounded-full px-1 transition ${
                           workflow.is_active
-                            ? "bg-[var(--success)]"
-                            : "bg-[var(--border-strong)]"
-                        } ${isToggling ? "opacity-70" : ""}`}
+                            ? 'bg-[var(--success)]'
+                            : 'bg-[var(--border-strong)]'
+                        } ${isToggling ? 'opacity-70' : ''}`}
                       >
                         {isToggling ? (
                           <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin text-white" />
                         ) : (
                           <span
                             className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                              workflow.is_active ? "translate-x-7" : "translate-x-0"
+                              workflow.is_active
+                                ? 'translate-x-7'
+                                : 'translate-x-0'
                             }`}
                           />
                         )}
@@ -757,7 +791,7 @@ export default function N8nWorkflowsPage() {
           <div className="flex h-full flex-col">
             <SheetHeader className="border-b border-[var(--border)] p-5">
               <SheetTitle className="text-[var(--text-primary)]">
-                {editingWorkflow ? "Edit Workflow" : "Add Workflow"}
+                {editingWorkflow ? 'Edit Workflow' : 'Add Workflow'}
               </SheetTitle>
             </SheetHeader>
 
@@ -840,7 +874,7 @@ export default function N8nWorkflowsPage() {
                 <div className="relative">
                   <Input
                     id="workflow-secret"
-                    type={showSecret ? "text" : "password"}
+                    type={showSecret ? 'text' : 'password'}
                     value={formState.secret_token}
                     onChange={(event) =>
                       setFormState((prev) => ({
@@ -853,7 +887,7 @@ export default function N8nWorkflowsPage() {
                   />
                   <button
                     type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                    className="absolute top-1/2 right-2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                     onClick={() => setShowSecret((prev) => !prev)}
                   >
                     {showSecret ? (

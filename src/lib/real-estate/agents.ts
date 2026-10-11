@@ -112,7 +112,6 @@ export async function runRealEstateAgents(input: AgentInput): Promise<void> {
     );
   }
 }
-
 async function updateLeadQualification(
   input: AgentInput,
   parsed: ParsedLeadRequirements,
@@ -368,21 +367,15 @@ async function createFollowUpTask(
 ) {
   const db = supabaseAdmin();
   const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-  const { data } = await db
-    .from("follow_up_tasks")
-    .upsert(
-      {
-        organization_id: input.organizationId,
-        contact_id: input.contactId,
-        conversation_id: input.conversationId,
-        reason,
-        due_at: dueAt,
-        status: "pending",
-      },
-      { onConflict: "organization_id,contact_id,reason", ignoreDuplicates: true },
-    )
-    .select("id")
-    .maybeSingle();
+  const { data } = await db.rpc("upsert_pending_follow_up", {
+    p_organization_id: input.organizationId,
+    p_contact_id: input.contactId,
+    p_conversation_id: input.conversationId,
+    p_assigned_agent_id: null,
+    p_reason: reason,
+    p_due_at: dueAt,
+    p_source: "followup_agent",
+  });
 
   await logActivity({
     ...baseActivity(input, "followup", idempotencyKey),
@@ -391,14 +384,14 @@ async function createFollowUpTask(
     outputSummary: `Follow-up task: ${reason}.`,
     reason: "Deterministic follow-up rule.",
     confidence: 0.72,
-    relatedEntityIds: { followUpTaskId: data?.id },
+    relatedEntityIds: { followUpTaskId: typeof data === "string" ? data : undefined },
   });
 
   await dispatchN8nEvent({
     organizationId: input.organizationId,
     event: "followup.created",
     entityType: "follow_up_tasks",
-    entityId: data?.id ?? input.contactId,
+    entityId: typeof data === "string" ? data : input.contactId,
     idempotencyKey: `${idempotencyKey}:event`,
     payload: {
       contactId: input.contactId,

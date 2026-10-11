@@ -1,17 +1,17 @@
 {
-  "name": "huygen-warp",
+  "name": "real-estate-ai-agent",
   "version": "0.2.1",
   "private": true,
-  "description": "Huygen Warp - WhatsApp AI CRM & automation platform. Self-hostable. Based on wacrm (MIT).",
+  "description": "Real Estate AI Agent - a multi-agent WhatsApp CRM for sales and lead qualification.",
   "license": "MIT",
   "author": "Arnas Donauskas",
-  "homepage": "https://github.com/ArnasDon/wacrm",
+  "homepage": "https://github.com/shravan-kumar-nalacharla/autonomous-real-estate-customer-support-and-lead-qualification-system",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ArnasDon/wacrm.git"
+    "url": "git+https://github.com/shravan-kumar-nalacharla/autonomous-real-estate-customer-support-and-lead-qualification-system.git"
   },
   "bugs": {
-    "url": "https://github.com/ArnasDon/wacrm/issues"
+    "url": "https://github.com/shravan-kumar-nalacharla/autonomous-real-estate-customer-support-and-lead-qualification-system/issues"
   },
   "keywords": [
     "crm",
@@ -20,6 +20,8 @@
     "nextjs",
     "supabase",
     "automation",
+    "real-estate",
+    "lead-qualification",
     "broadcast",
     "self-hosted",
     "template"

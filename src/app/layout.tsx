@@ -1,33 +1,33 @@
-import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
-import { Toaster } from "sonner";
-import "./globals.css";
-import { ThemeProvider } from "@/hooks/use-theme";
-import { DEFAULT_THEME, STORAGE_KEY, THEME_IDS } from "@/lib/themes";
+import type { Metadata, Viewport } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import Script from 'next/script';
+import { Toaster } from 'sonner';
+import './globals.css';
+import { ThemeProvider } from '@/hooks/use-theme';
+import { DEFAULT_THEME, STORAGE_KEY, THEME_IDS } from '@/lib/themes';
 
 const geist = Geist({
-  variable: "--font-sans",
-  subsets: ["latin"],
+  variable: '--font-sans',
+  subsets: ['latin'],
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
 });
 
 export const metadata: Metadata = {
   title: {
-    default: "Huygen Warp",
-    template: "%s - Huygen Warp",
+    default: 'Real Estate AI Agent',
+    template: '%s - Real Estate AI Agent',
   },
-  description: "Huygen Warp - WhatsApp AI CRM",
+  description: 'AI-powered WhatsApp CRM for real estate teams',
   robots: {
     index: false,
     follow: false,
   },
   icons: {
-    icon: [{ url: "/favicon.svg" }],
+    icon: [{ url: '/favicon.svg' }],
   },
   formatDetection: {
     email: false,
@@ -37,8 +37,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#F7F5F2",
-  colorScheme: "light dark",
+  themeColor: '#F7F5F2',
+  colorScheme: 'light dark',
 };
 
 const THEME_BOOT_SCRIPT = `
@@ -74,7 +74,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }}
         />
       </head>
-      <body className="min-h-full bg-[var(--bg-base)] text-[var(--text-primary)] font-sans">
+      <body className="min-h-full bg-[var(--bg-base)] font-sans text-[var(--text-primary)]">
         <ThemeProvider>
           {children}
           <Toaster
@@ -82,9 +82,9 @@ export default function RootLayout({
             position="top-right"
             toastOptions={{
               style: {
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border)",
-                color: "var(--text-primary)",
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-primary)',
               },
             }}
           />

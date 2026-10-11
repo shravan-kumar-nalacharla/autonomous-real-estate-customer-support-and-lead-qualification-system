@@ -37,6 +37,7 @@ export async function POST(request: Request) {
         outcome: body.outcome ?? {},
         completed_at: status === "completed" ? now : null,
         failed_at: status === "failed" ? now : null,
+        error_message: status === "failed" ? body.outcome?.error ?? null : null,
         updated_at: now,
       },
       { onConflict: "organization_id,event_id" },

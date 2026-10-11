@@ -1,0 +1,834 @@
+{
+  "name": "Real Estate AI Agent - Production v12",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# Autonomous Real Estate Multi-Agent WhatsApp CRM\n\nThis workflow is the real-estate replacement for the older VV Interior workflow.\n\nIt deliberately does **not**:\n- store CRM state in n8n workflow static data,\n- use Google Sheets as the lead database,\n- call Supabase REST with a global service-role key,\n- send customer messages directly to Meta outside the CRM,\n- trust a browser/client-supplied organization ID without backend verification.\n\nThe Real Estate AI Agent backend remains the system of record. It owns tenant checks, durable event idempotency, lead/contact/property/appointment writes, the WhatsApp send outbox, CRM inbox synchronization, and n8n event status.\n\n## Inbound endpoint\nPOST /webhook/huygen-real-estate-inbound\n\nReal Estate AI Agent must include:\n- x-n8n-inbound-secret: <N8N_INBOUND_SECRET>\n- event_id (stable idempotency key)\n- organization_id\n- conversation_id\n- contact_id\n- message_text or interactive_reply_id\n- message_id where available\n\nActivate only after the five internal Real Estate AI Agent endpoints listed in the API contract note are implemented and all Render environment variables are configured.\n\n## CRM webhook setup for this v5 workflow\nIf your CRM automation cannot send custom headers, use the Production URL with `?secret=<N8N_INBOUND_SECRET>`. Leave Body Template JSON empty so the CRM sends its default payload containing message_text/customer_phone/customer_name/conversation_id/contact_id. Do not use broken `{{message}}` placeholders if they resolve to empty.\n\n## v6 fix\nThis version allows the backend context endpoint to resolve the organization when the CRM automation payload does not include organization_id. It still validates organization_id if a real value is supplied.",
+        "height": 520,
+        "width": 690,
+        "color": 4
+      },
+      "id": "78014f24-aceb-4f89-8327-aec46c378084",
+      "name": "SETUP — READ BEFORE ACTIVATING",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        11040,
+        20880
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# Non-negotiable security boundary\n\nn8n receives a Real Estate AI Agent server-to-server event. It must never receive unauthenticated raw Meta webhook traffic directly.\n\nEvery internal Real Estate AI Agent endpoint must:\n1. validate x-internal-secret;\n2. resolve the organization from server-side records, not from the request alone;\n3. verify conversation/contact/property IDs belong to that organization;\n4. use durable event/message idempotency;\n5. write tenant-scoped agent activity logs;\n6. never return database/API credentials to n8n.\n\nThe workflow sends only explicit DTOs. It never forwards its `config` object to Real Estate AI Agent, so OpenAI keys and internal secrets are not written to CRM logs.\n\nThe Real Estate AI Agent send endpoint must enforce the WhatsApp service-window/template rules and create an idempotent outbound CRM message before calling Meta.",
+        "height": 460,
+        "width": 650,
+        "color": 6
+      },
+      "id": "a5994a56-3c7e-49b1-8aaa-58217e217213",
+      "name": "SECURITY & TENANCY CONTRACT",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        11792,
+        20880
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# Required n8n / Render variables\n\nN8N_INBOUND_SECRET=<same secret sent by Real Estate AI Agent/CRM>\nN8N_INTERNAL_SECRET=<same secret configured in Real Estate AI Agent app>\nN8N_BLOCK_ENV_ACCESS_IN_NODE=false\n\nRecommended:\nHUYGEN_BASE_URL=https://YOUR-HUYGEN-DOMAIN\nOPENAI_API_KEY=<server-only key>\nOPENAI_MODEL=gpt-4.1-mini\n\nOptional explicit endpoint overrides:\nHUYGEN_N8N_CONTEXT_URL=https://YOUR-HUYGEN-DOMAIN/api/internal/n8n/real-estate/context\nHUYGEN_PROPERTY_MATCH_URL=https://YOUR-HUYGEN-DOMAIN/api/internal/n8n/real-estate/property-match\nHUYGEN_AGENT_PLAN_URL=https://YOUR-HUYGEN-DOMAIN/api/internal/n8n/real-estate/agent-plan\nHUYGEN_INTERNAL_SEND_URL=https://YOUR-HUYGEN-DOMAIN/api/internal/n8n/send-message\nHUYGEN_N8N_EVENT_STATUS_URL=https://YOUR-HUYGEN-DOMAIN/api/internal/n8n/real-estate/event-status\n\nDo not put Supabase service-role keys or Meta tokens in n8n. Real Estate AI Agent owns database writes, tenant checks, slot booking, and WhatsApp send.",
+        "height": 490,
+        "width": 650,
+        "color": 5
+      },
+      "id": "b101be11-70e9-448f-bbd0-0c3a92c88da6",
+      "name": "REQUIRED RENDER ENVIRONMENT VARIABLES",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        12496,
+        20880
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "huygen-real-estate-inbound",
+        "options": {}
+      },
+      "id": "93bc6514-15f6-4657-b996-837ab644e239",
+      "name": "Webhook - Real Estate AI Agent Real Estate Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        9040,
+        21552
+      ],
+      "webhookId": "59ba71e1-e1fc-40d3-b8b8-dcdc838d13c5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const envelope = $input.first().json || {};\nconst headers = envelope.headers || {};\nconst query = envelope.query || {};\nlet body = envelope.body && typeof envelope.body === 'object' ? envelope.body : envelope;\n\n// Some senders submit a JSON string body. Parse it defensively.\nif (typeof envelope.body === 'string') {\n  try {\n    body = JSON.parse(envelope.body);\n  } catch (_e) {\n    body = { message_text: envelope.body };\n  }\n}\n\nconst payload = body?.payload && typeof body.payload === 'object' ? body.payload : body;\nconst data = body?.data && typeof body.data === 'object' ? body.data : {};\n\nfunction firstText(...values) {\n  for (const v of values) {\n    if (v === undefined || v === null) continue;\n    if (typeof v === 'object') continue;\n    const s = String(v).trim();\n    if (s && s.toLowerCase() !== 'empty') return s;\n  }\n  return '';\n}\nfunction cleanId(v) {\n  return String(v || '').trim().replace(/[^a-zA-Z0-9:_-]/g, '').slice(0, 180);\n}\nfunction cleanPhone(v) {\n  return String(v || '').replace(/[^\\d]/g, '').slice(0, 20);\n}\nfunction headerValue(name) {\n  const expected = name.toLowerCase();\n  for (const [k, v] of Object.entries(headers || {})) {\n    if (String(k).toLowerCase() === expected) {\n      return Array.isArray(v) ? String(v[0] || '') : String(v || '');\n    }\n  }\n  return '';\n}\nfunction hash(s) {\n  let h = 2166136261;\n  s = String(s || '');\n  for (let i = 0; i < s.length; i++) {\n    h ^= s.charCodeAt(i);\n    h = Math.imul(h, 16777619);\n  }\n  return (h >>> 0).toString(16);\n}\n\nconst expectedSecret = String($env.N8N_INBOUND_SECRET || '').trim();\nconst receivedSecret = firstText(\n  headerValue('x-n8n-inbound-secret'),\n  headerValue('x-huygen-n8n-secret'),\n  headerValue('x-inbound-secret'),\n  payload.secret,\n  payload.n8n_inbound_secret,\n  body.secret,\n  body.n8n_inbound_secret,\n  query.secret,\n  query.n8n_inbound_secret,\n  query.inbound_secret\n);\n\nif (!expectedSecret) {\n  throw new Error('N8N_INBOUND_SECRET is missing in the n8n environment.');\n}\nif (receivedSecret !== expectedSecret) {\n  return [];\n}\n\nconst rawEvent = firstText(payload.event_type, payload.type, data.event_type, body.event_type, body.type, 'whatsapp.inbound_message').toLowerCase();\nif (rawEvent.includes('status') || rawEvent.includes('delivery') || rawEvent.includes('read')) {\n  return [];\n}\n\nconst actionId = cleanId(firstText(\n  payload.interactive_reply_id,\n  payload.action_id,\n  payload.button_id,\n  payload.selected_option_id,\n  payload.interactive?.button_reply?.id,\n  payload.interactive?.list_reply?.id,\n  data.interactive_reply_id,\n  data.action_id,\n  body.interactive_reply_id,\n  body.action_id\n));\nconst actionTitle = firstText(\n  payload.interactive_reply_title,\n  payload.action_title,\n  payload.button_title,\n  payload.interactive?.button_reply?.title,\n  payload.interactive?.list_reply?.title,\n  data.interactive_reply_title,\n  data.action_title,\n  body.interactive_reply_title,\n  body.action_title\n);\nconst messageText = firstText(\n  payload.message_text,\n  payload.inbound_text,\n  payload.text,\n  typeof payload.message === 'string' ? payload.message : '',\n  payload.message?.text,\n  payload.customer_message,\n  data.message_text,\n  data.message,\n  data.text,\n  data.message?.text,\n  body.message_text,\n  body.message,\n  body.text,\n  body.message?.text,\n  actionTitle,\n  actionId\n);\n\nif (!messageText && !actionId && !payload.media_id && !body.media_id && !data.media_id) {\n  throw new Error('No customer message found. In the CRM Send Webhook action, clear Body Template JSON so the CRM sends its default payload, and put the n8n secret in the webhook URL as ?secret=YOUR_N8N_INBOUND_SECRET. The custom {{message}}/{{phone}} variables are currently resolving to empty.');\n}\n\nconst organizationId = cleanId(firstText(payload.organization_id, payload.organizationId, payload.org_id, data.organization_id, data.organizationId, data.org_id, body.organization_id, body.organizationId, body.org_id));\nconst conversationId = cleanId(firstText(payload.conversation_id, payload.conversationId, payload.conversationID, data.conversation_id, data.conversationId, data.conversationID, body.conversation_id, body.conversationId, body.conversationID));\nconst contactId = cleanId(firstText(payload.contact_id, payload.contactId, payload.customer_id, data.contact_id, data.contactId, data.customer_id, body.contact_id, body.contactId, body.customer_id));\nconst messageId = cleanId(firstText(payload.message_id, payload.messageId, payload.whatsapp_message_id, payload.wamid, data.message_id, data.messageId, data.whatsapp_message_id, data.wamid, body.message_id, body.messageId, body.whatsapp_message_id, body.wamid));\nconst phone = cleanPhone(firstText(payload.customer_phone, payload.customerPhone, payload.phone, payload.contact?.phone, data.customer_phone, data.customerPhone, data.phone, data.contact?.phone, body.customer_phone, body.customerPhone, body.phone, body.contact?.phone));\nconst customerName = firstText(payload.customer_name, payload.customerName, payload.contact_name, payload.contact?.name, payload.name, data.customer_name, data.customerName, data.contact_name, data.contact?.name, data.name, body.customer_name, body.customerName, body.contact_name, body.name);\nconst seed = [rawEvent, organizationId, conversationId, contactId, messageId, phone, messageText, payload.timestamp, data.timestamp, body.timestamp, Date.now()].join('|');\nconst eventId = cleanId(firstText(payload.event_id, payload.eventId, data.event_id, data.eventId, body.event_id, body.eventId, body.idempotency_key, messageId, `crm:${hash(seed)}`));\n\nconst event = {\n  event_id: eventId,\n  event_type: rawEvent === 'new_message_received' ? 'whatsapp.inbound_message' : rawEvent,\n  organization_id: organizationId || null,\n  conversation_id: conversationId || null,\n  contact_id: contactId || null,\n  message_id: messageId || null,\n  message_text: messageText,\n  interactive_reply_id: actionId || null,\n  interactive_reply_title: actionTitle || null,\n  message_type: firstText(payload.message_type, data.message_type, body.message_type, actionId ? 'interactive' : 'text'),\n  media_id: cleanId(firstText(payload.media_id, data.media_id, body.media_id)) || null,\n  customer_phone: phone,\n  customer_name: customerName,\n  received_at: firstText(payload.received_at, payload.timestamp, data.received_at, data.timestamp, body.received_at, body.timestamp, new Date().toISOString()),\n  source: firstText(payload.source, data.source, body.source, 'huygen_crm')\n};\n\nreturn [{ json: { event, raw_payload: payload } }];"
+      },
+      "id": "c03756ae-9d8f-4c7e-bbda-e652a57a6b30",
+      "name": "Normalize + Authenticate Real Estate AI Agent Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9312,
+        21552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\n\nfunction clean(v) { return String(v ?? '').trim(); }\nfunction cleanUrl(v) { return clean(v).replace(/\\/+$/, ''); }\nfunction joinUrl(base, path) { return cleanUrl(base) ? `${cleanUrl(base)}${path}` : ''; }\nfunction intRange(v, fallback, min, max) {\n  const n = Number.parseInt(clean(v), 10);\n  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;\n}\nfunction hash(s) {\n  let h = 2166136261;\n  s = String(s || '');\n  for (let i = 0; i < s.length; i++) {\n    h ^= s.charCodeAt(i);\n    h = Math.imul(h, 16777619);\n  }\n  return (h >>> 0).toString(16);\n}\nfunction firstText(...values) {\n  for (const v of values) {\n    if (v === undefined || v === null) continue;\n    if (typeof v === 'object') continue;\n    const s = String(v).trim();\n    if (s) return s;\n  }\n  return '';\n}\nfunction cleanId(v) { return String(v || '').trim().replace(/[^a-zA-Z0-9:_-]/g, '').slice(0, 180); }\nfunction cleanPhone(v) { return String(v || '').replace(/[^\\d]/g, '').slice(0, 20); }\n\n// Primary path: event from Normalize node.\nlet event = input.event;\n\n// Fallback path: reconstruct event directly from webhook input if this node is run from copied execution data or n8n loses node state.\nif (!event || typeof event !== 'object') {\n  let webhook = {};\n  try { webhook = $('Webhook - Real Estate AI Agent Real Estate Inbound').first().json || {}; } catch (_) { webhook = {}; }\n  const body = webhook.body && typeof webhook.body === 'object' ? webhook.body : (input.body && typeof input.body === 'object' ? input.body : input);\n  const payload = body?.payload && typeof body.payload === 'object' ? body.payload : body;\n  const messageText = firstText(payload.message_text, payload.message, payload.text, body.message_text, body.message, body.text);\n  const phone = cleanPhone(firstText(payload.customer_phone, payload.phone, body.customer_phone, body.phone));\n  const messageId = cleanId(firstText(payload.message_id, payload.messageId, payload.whatsapp_message_id, body.message_id, body.messageId));\n  const seed = [messageId, phone, messageText, payload.timestamp, body.timestamp].join('|');\n  event = {\n    event_id: cleanId(firstText(payload.event_id, payload.eventId, body.event_id, body.eventId, messageId, `crm:${hash(seed)}`)),\n    event_type: firstText(payload.event_type, payload.type, body.event_type, body.type, 'whatsapp.inbound_message'),\n    organization_id: cleanId(firstText(payload.organization_id, payload.organizationId, body.organization_id, body.organizationId)) || null,\n    conversation_id: cleanId(firstText(payload.conversation_id, payload.conversationId, body.conversation_id, body.conversationId)) || null,\n    contact_id: cleanId(firstText(payload.contact_id, payload.contactId, body.contact_id, body.contactId)) || null,\n    message_id: messageId || null,\n    message_text: messageText,\n    message_type: firstText(payload.message_type, body.message_type, 'text'),\n    media_id: cleanId(firstText(payload.media_id, body.media_id)) || null,\n    customer_phone: phone,\n    customer_name: firstText(payload.customer_name, payload.customerName, payload.name, body.customer_name, body.customerName, body.name),\n    received_at: firstText(payload.received_at, payload.timestamp, body.received_at, body.timestamp, new Date().toISOString()),\n    source: firstText(payload.source, body.source, 'huygen_crm')\n  };\n}\n\nif (!event || typeof event !== 'object' || !event.event_id || !event.message_text) {\n  throw new Error('Normalized event could not be built. Send body.secret plus message_text/message, and ideally event_id/message_id.');\n}\n\nconst base = cleanUrl($env.HUYGEN_BASE_URL || $env.NEXT_PUBLIC_SITE_URL);\nconst config = {\n  n8nInternalSecret: clean($env.N8N_INTERNAL_SECRET),\n  contextUrl: cleanUrl($env.HUYGEN_N8N_CONTEXT_URL) || joinUrl(base, '/api/internal/n8n/real-estate/context'),\n  propertyMatchUrl: cleanUrl($env.HUYGEN_PROPERTY_MATCH_URL) || joinUrl(base, '/api/internal/n8n/real-estate/property-match'),\n  agentPlanUrl: cleanUrl($env.HUYGEN_AGENT_PLAN_URL) || joinUrl(base, '/api/internal/n8n/real-estate/agent-plan'),\n  internalSendUrl: cleanUrl($env.HUYGEN_INTERNAL_SEND_URL) || joinUrl(base, '/api/internal/n8n/send-message'),\n  eventStatusUrl: cleanUrl($env.HUYGEN_N8N_EVENT_STATUS_URL) || joinUrl(base, '/api/internal/n8n/real-estate/event-status'),\n  openaiApiKey: clean($env.OPENAI_API_KEY),\n  openaiModel: clean($env.OPENAI_MODEL) || 'gpt-4o-mini',\n  defaultFollowupHours: intRange($env.REAL_ESTATE_DEFAULT_FOLLOWUP_HOURS, 24, 1, 168),\n  hotFollowupHours: intRange($env.REAL_ESTATE_HOT_FOLLOWUP_HOURS, 4, 1, 72),\n};\n\nconst missing = [];\nif (!config.n8nInternalSecret) missing.push('N8N_INTERNAL_SECRET');\nif (!config.openaiApiKey) missing.push('OPENAI_API_KEY');\nif (!base && (!config.contextUrl || !config.propertyMatchUrl || !config.agentPlanUrl || !config.internalSendUrl || !config.eventStatusUrl)) {\n  missing.push('HUYGEN_BASE_URL or explicit HUYGEN_N8N_* URLs');\n}\nif (missing.length) throw new Error(`Required environment variables are missing: ${missing.join(', ')}`);\n\nreturn [{ json: { event, config, raw_payload: input.raw_payload || null } }];"
+      },
+      "id": "878986c2-ca33-46e4-8208-c62801447d90",
+      "name": "CONFIG - Read Render Environment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9568,
+        21552
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.contextUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-internal-secret",
+              "value": "={{$json.config.n8nInternalSecret}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { event: $json.event } }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 45000
+        }
+      },
+      "id": "d6e77f73-d09f-4b75-aaaa-a7c518bdd3fc",
+      "name": "Real Estate AI Agent - Get Secure CRM Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        9824,
+        21552
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const seed = $('CONFIG - Read Render Environment').first().json;\nconst response = $input.first().json || {};\nconst context = response.data || response.context || response;\n\nif (!context || !context.organization || !context.organization.id) {\n  throw new Error('Real Estate AI Agent context endpoint returned no organization context.');\n}\n\n// The Real Estate AI Agent backend is the source of truth for tenant/org resolution.\n// Some CRM automation payloads do not expose organization_id, so Normalize may use a placeholder.\n// Validate only when a real event org id was supplied. Otherwise adopt the backend-resolved org id.\nconst contextOrgId = String(context.organization.id || '').trim();\nconst eventOrgId = String(seed.event?.organization_id || '').trim();\nconst placeholderOrgIds = new Set(['', 'default-org', 'unknown', 'null', 'undefined']);\n\nif (!placeholderOrgIds.has(eventOrgId.toLowerCase()) && eventOrgId !== contextOrgId) {\n  throw new Error(`Organization mismatch in secure context response. event=${eventOrgId} context=${contextOrgId}`);\n}\n\nconst normalizedEvent = {\n  ...seed.event,\n  organization_id: contextOrgId,\n  conversation_id: context.conversation?.id || seed.event.conversation_id,\n  contact_id: context.contact?.id || seed.event.contact_id,\n  customer_phone: context.contact?.phone || seed.event.customer_phone,\n  customer_name: context.contact?.name || seed.event.customer_name,\n};\n\nreturn [{\n  json: {\n    event: normalizedEvent,\n    config: seed.config,\n    context,\n  }\n}];"
+      },
+      "id": "8e03ff1d-9203-4059-8e09-b6b02410d332",
+      "name": "Merge Secure CRM Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10096,
+        21552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst text = String(item.event?.message_text || '').trim().toLowerCase();\nconst isOptOutRequest = /^(stop|unsubscribe|opt out|optout|cancel)$/i.test(text);\nconst duplicate = item.context?.event_is_duplicate === true || item.context?.event_already_completed === true;\nconst paused = item.context?.conversation?.automation_paused === true;\n\n// Agent mode must keep the automation running even if a stale handoff flag is true.\n// Only block when the conversation is actually owned by a human/manual mode.\nconst automationMode = String(item.context?.conversation?.automation_mode || '').trim().toLowerCase();\nconst handoffActive = item.context?.conversation?.handoff_active === true;\nconst humanOwnedModes = new Set(['human', 'manual', 'paused', 'off', 'disabled']);\nconst activeHumanHandoff = handoffActive && (humanOwnedModes.has(automationMode) || !automationMode);\n\nreturn [{\n  json: {\n    ...item,\n    is_opt_out_request: isOptOutRequest,\n    preflight: {\n      duplicate,\n      paused,\n      handoff_active: handoffActive,\n      automation_mode: automationMode || null,\n      active_human_handoff_blocks_automation: activeHumanHandoff,\n    },\n    skip_processing: Boolean(duplicate || (paused && !isOptOutRequest) || (activeHumanHandoff && !isOptOutRequest)),\n  }\n}];"
+      },
+      "id": "3ac4d408-1109-4aaf-9f7f-f5daf95d8926",
+      "name": "Preflight - Idempotency & Automation Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10352,
+        21552
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.skip_processing === true}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "94d188f1-3160-4b13-b0c4-34af6055db7a",
+      "name": "IF - Skip Duplicate or Paused Conversation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        10640,
+        21248
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $json.config.openaiApiKey}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({ model: $json.config.openaiModel, temperature: 0.12, response_format: { type: 'json_object' }, messages: [ { role: 'system', content: `You are a production real-estate WhatsApp CRM orchestrator. Classify one inbound customer message and extract only facts present in the message or persisted CRM context. Never promise property availability, legal title, loan approval, final price, or confirmed appointment. CRM/human agents confirm those.\n\nHandle these journeys: buy ready-built property, buy under-construction/new-launch, buy land/plot, rent residential, buy/rent commercial, sell/list a property, valuation, appointment/site visit, market/process question, human handoff.\n\nReal estate fields to understand:\n- land/plot/site: area, unit, locality, facing, road width, approval authority, zoning, title clarity, utilities, boundary, survey number.\n- built residential: BHK, carpet/built-up/super built-up area, floor, age, possession, furnishing, parking, amenities, project/society, RERA/project id.\n- commercial: shop/office/warehouse/showroom, frontage, floor, power load, footfall, sale/lease, deposit, lock-in.\n- appointment/site visit: requested slot only until the CRM slot engine confirms.\n\nSupported intents: property_search, requirements_update, property_question, appointment_request, appointment_change, appointment_cancel, sell_property, rent_property, valuation_request, market_question, human_support, complaint_or_sensitive, general_enquiry, unknown.\n\nEscalate for negotiation, legal/title guarantee, loan/financing advice, complaints, abusive/urgent language, explicit human/broker/agent request, final price promise, exact market prediction, or confidence < 0.45.\n\nReturn JSON only with this schema:\n{\"intent\":\"property_search\",\"confidence\":0,\"response_language\":\"en\",\"extracted\":{\"customer_role\":\"buyer|renter|seller|landlord|investor|broker|unknown\",\"listing_intent\":\"buy|rent|sell|lease|unknown\",\"property_category\":\"residential|commercial|land|unknown\",\"property_type\":\"apartment|villa|independent_house|plot|agricultural_land|commercial_shop|office|warehouse|showroom|unknown\",\"property_stage\":\"ready_to_move|under_construction|new_launch|resale|land_plot|unknown\",\"preferred_locations\":[],\"budget_min\":null,\"budget_max\":null,\"currency\":\"INR\",\"bedrooms\":null,\"bathrooms\":null,\"area_min\":null,\"area_max\":null,\"area_unit\":\"sqft|sqyd|acre|cent|gunta|sqm|unknown\",\"plot_facing\":\"\",\"road_width\":\"\",\"approval_authority\":\"\",\"rera_id\":\"\",\"possession_timeline\":\"\",\"buying_timeline\":\"\",\"financing_required\":\"yes|no|unknown\",\"loan_preapproved\":\"yes|no|unknown\",\"furnishing\":\"furnished|semi_furnished|unfurnished|unknown\",\"parking_required\":\"yes|no|unknown\",\"amenities\":[],\"site_visit_interest\":\"yes|no|unknown\",\"preferred_appointment_date\":\"\",\"preferred_appointment_time\":\"\",\"preferred_appointment_at\":\"\",\"property_reference\":\"\",\"seller_property_details\":\"\"},\"requires_human\":false,\"risk_flags\":[],\"customer_reply_hint\":\"\"}` }, { role: 'user', content: 'Organization: ' + JSON.stringify({ name: $json.context.organization?.name || 'Real Estate Agency', timezone: $json.context.organization?.timezone || 'Asia/Kolkata' }) + '\\nExisting lead requirements: ' + JSON.stringify($json.context.lead_requirements || {}) + '\\nConversation state: ' + JSON.stringify({ handoff_active: $json.context.conversation?.handoff_active || false, automation_paused: $json.context.conversation?.automation_paused || false, current_stage: $json.context.conversation?.pipeline_stage || '' }) + '\\nMenu action: ' + ($json.event.interactive_reply_id || '') + '\\nCustomer message: ' + ($json.event.message_text || '') } ] }) }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 45000
+        }
+      },
+      "id": "c84075ab-b622-4ecc-bc9f-5e2965c3e7b5",
+      "name": "AI - Conversation Orchestrator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        10880,
+        21696
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "jsCode": "const base=$('Preflight - Idempotency & Automation Guard').first().json;\nconst raw=$input.first().json||{}; const content=raw?.choices?.[0]?.message?.content||raw?.body?.choices?.[0]?.message?.content||'{}';\nlet parsed={}; try{parsed=typeof content==='string'?JSON.parse(content):content;}catch{parsed={intent:'unknown',confidence:0,extracted:{},requires_human:true,risk_flags:['orchestrator_parse_failed'],customer_reply_hint:''};}\nconst allowed=new Set(['property_search','requirements_update','property_question','appointment_request','appointment_change','appointment_cancel','sell_property','rent_property','valuation_request','market_question','human_support','complaint_or_sensitive','general_enquiry','unknown']);\nconst action=String(base.event.interactive_reply_id||'').toLowerCase(); const actionIntent={find_property:'property_search',book_site_visit:'appointment_request',talk_to_agent:'human_support',sell_property:'sell_property',buy_plot:'property_search'}[action];\nconst intent=actionIntent||(allowed.has(parsed.intent)?parsed.intent:'unknown'); const confidence=Math.max(0,Math.min(1,Number(parsed.confidence||0))); const s=(parsed.extracted&&typeof parsed.extracted==='object')?parsed.extracted:{}; const e=base.context.lead_requirements||{};\nfunction clean(v,m=180){return String(v??'').trim().slice(0,m);} function en(v,a,f='unknown'){v=clean(v,60).toLowerCase();return a.includes(v)?v:f;} function pi(v,max=100){const n=parseInt(v,10);return Number.isFinite(n)&&n>0?Math.min(n,max):null;} function pm(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/[^\\d.]/g,''));return Number.isFinite(n)&&n>=0?Math.round(n):null;} function pn(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/[^\\d.]/g,''));return Number.isFinite(n)&&n>0?n:null;} function arr(v,n=8,m=80){return Array.isArray(v)?v.map(x=>clean(x,m)).filter(Boolean).slice(0,n):[];} function keep(a,b,f=null){return a!==null&&a!==undefined&&a!==''?a:(b!==null&&b!==undefined&&b!==''?b:f);}\nconst loc=arr(s.preferred_locations,6,90), amenities=arr(s.amenities,10,60);\nconst requirements={customer_role:en(keep(s.customer_role,e.customer_role),['buyer','renter','seller','landlord','investor','broker','unknown']),listing_intent:en(keep(s.listing_intent,e.listing_intent),['buy','rent','sell','lease','unknown']),property_category:en(keep(s.property_category,e.property_category),['residential','commercial','land','unknown']),property_type:en(keep(s.property_type,e.property_type),['apartment','villa','independent_house','plot','agricultural_land','commercial_shop','office','warehouse','showroom','unknown']),property_stage:en(keep(s.property_stage,e.property_stage),['ready_to_move','under_construction','new_launch','resale','land_plot','unknown']),preferred_locations:loc.length?loc:(Array.isArray(e.preferred_locations)?e.preferred_locations:[]),budget_min:pm(s.budget_min)??e.budget_min??null,budget_max:pm(s.budget_max)??e.budget_max??null,currency:clean(s.currency||e.currency||'INR',8).toUpperCase(),bedrooms:pi(s.bedrooms,20)??e.bedrooms??null,bathrooms:pi(s.bathrooms,20)??e.bathrooms??null,area_min:pn(s.area_min)??e.area_min??null,area_max:pn(s.area_max)??e.area_max??null,area_unit:en(keep(s.area_unit,e.area_unit),['sqft','sqyd','acre','cent','gunta','sqm','unknown']),plot_facing:clean(s.plot_facing||e.plot_facing||'',80),road_width:clean(s.road_width||e.road_width||'',80),approval_authority:clean(s.approval_authority||e.approval_authority||'',80),rera_id:clean(s.rera_id||e.rera_id||'',80),possession_timeline:clean(s.possession_timeline||e.possession_timeline||'',120),buying_timeline:clean(s.buying_timeline||s.timeline||e.buying_timeline||e.timeline||'',120),financing_required:en(keep(s.financing_required,e.financing_required),['yes','no','unknown']),loan_preapproved:en(keep(s.loan_preapproved,e.loan_preapproved),['yes','no','unknown']),furnishing:en(keep(s.furnishing,e.furnishing),['furnished','semi_furnished','unfurnished','unknown']),parking_required:en(keep(s.parking_required,e.parking_required),['yes','no','unknown']),amenities:amenities.length?amenities:(Array.isArray(e.amenities)?e.amenities:[]),site_visit_interest:en(keep(s.site_visit_interest,e.site_visit_interest),['yes','no','unknown']),preferred_appointment_date:clean(s.preferred_appointment_date||'',80),preferred_appointment_time:clean(s.preferred_appointment_time||'',80),preferred_appointment_at:clean(s.preferred_appointment_at||'',120),property_reference:clean(s.property_reference||'',120),seller_property_details:clean(s.seller_property_details||e.seller_property_details||'',500)};\nreturn [{json:{event:base.event,config:base.config,context:base.context,is_opt_out_request:base.is_opt_out_request,orchestrator:{intent,confidence,response_language:clean(parsed.response_language||'en',12),requirements,requires_human:Boolean(parsed.requires_human),risk_flags:arr(parsed.risk_flags,12,80),customer_reply_hint:clean(parsed.customer_reply_hint,500)}}}];"
+      },
+      "id": "2e1381e3-5ac3-4c06-b558-1f35319d17c8",
+      "name": "Parse & Validate Orchestrator Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11136,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input=$input.first().json; const r={...input.orchestrator.requirements};\nconst hasLocation=Array.isArray(r.preferred_locations)&&r.preferred_locations.length>0, hasBudget=Number.isFinite(Number(r.budget_min))||Number.isFinite(Number(r.budget_max)), hasIntent=r.listing_intent&&r.listing_intent!=='unknown', hasCategory=r.property_category&&r.property_category!=='unknown', hasType=r.property_type&&r.property_type!=='unknown', hasTimeline=Boolean(String(r.buying_timeline||r.possession_timeline||'').trim()), hasArea=Number.isFinite(Number(r.area_min))||Number.isFinite(Number(r.area_max)), hasBeds=Number.isFinite(Number(r.bedrooms))&&Number(r.bedrooms)>0;\nconst visitRequested=r.site_visit_interest==='yes'||input.orchestrator.intent==='appointment_request'; const verified=Boolean(input.context.contact?.phone_verified||input.event.customer_phone||input.context.contact?.phone); const isLand=r.property_category==='land'||['plot','agricultural_land'].includes(r.property_type)||r.property_stage==='land_plot'; const isSeller=['sell_property','valuation_request'].includes(input.orchestrator.intent)||['seller','landlord'].includes(r.customer_role)||['sell','lease'].includes(r.listing_intent);\nlet score=0; const breakdown=[]; function add(p,reason,ok){if(ok){score+=p;breakdown.push({points:p,reason});}}\nadd(10,'Customer role/intent captured',r.customer_role!=='unknown'||hasIntent); add(15,'Preferred location captured',hasLocation); add(20,'Budget/rate expectation captured',hasBudget); add(15,'Property category/type captured',hasCategory||hasType); add(10,isLand?'Plot/land area captured':'Bedroom or area requirement captured',isLand?hasArea:(hasBeds||hasArea)); add(15,'Timeline captured',hasTimeline); add(15,'Site visit interest captured',visitRequested); add(10,'Customer phone is available',verified); score=Math.max(0,Math.min(100,score));\nconst missing=[]; if(!hasIntent)missing.push('buy/rent/sell intent'); if(!hasLocation&&!isSeller)missing.push('preferred location'); if(!hasBudget)missing.push(isSeller?'expected price/rent':'budget range'); if(!hasCategory&&!hasType)missing.push('property category/type'); if(isLand&&!hasArea)missing.push('plot area'); if(!isLand&&!hasBeds&&!hasArea&&!isSeller)missing.push('bedrooms or area'); if(!hasTimeline)missing.push('timeline'); if(isLand&&!r.approval_authority)missing.push('plot approval/title details');\nconst core=[hasIntent,hasLocation||isSeller,hasBudget,hasCategory||hasType,hasTimeline].filter(Boolean).length; let leadCategory='general_enquiry'; if(core>=2)leadCategory=score>=75?'hot':score>=45?'warm':'cold';\nconst canMatchProperties=Boolean(['property_search','requirements_update','property_question','rent_property'].includes(input.orchestrator.intent)&&(hasLocation||hasType||hasBeds||hasBudget||hasArea)&&!isSeller&&!input.is_opt_out_request);\nconst pipelineStage=input.is_opt_out_request?'opted_out':input.orchestrator.intent==='appointment_request'?'site_visit_requested':leadCategory==='hot'?'qualified_hot':leadCategory==='warm'?'qualified_warm':canMatchProperties?'requirements_captured':'new_enquiry';\nconst summary=[`Intent: ${input.orchestrator.intent}`,`Category: ${leadCategory}`,`Score: ${score}/100`,missing.length?`Missing: ${missing.join(', ')}`:'Requirements complete'].join('. ');\nreturn [{json:{...input,qualification:{requirements:r,score,lead_category:leadCategory,score_breakdown:breakdown,missing_fields:missing,next_best_questions:missing.slice(0,3),can_match_properties:canMatchProperties,pipeline_stage:pipelineStage,summary},property_matches:[],agent_activities:[{agent_type:'orchestrator',action_type:'intent_routed',reason:input.event.interactive_reply_id?'Interactive menu action':'LLM intent classification',input_summary:`Customer intent classified as ${input.orchestrator.intent}.`,output_summary:`Route: ${canMatchProperties?'qualification → property_matching':'qualification'}.`,confidence:input.orchestrator.confidence,related_entity_ids:{}},{agent_type:'qualification',action_type:'lead_scored',reason:'Explainable real-estate qualification rules',input_summary:`Captured ${core} core signals.`,output_summary:summary,confidence:1,related_entity_ids:{}}]}}];"
+      },
+      "id": "9301e32a-11f1-42c8-91a1-417acc3b0f69",
+      "name": "Lead Qualification Agent - Score & Classify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11392,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.qualification.can_match_properties === true}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "9c2014d3-b807-4feb-a256-5d89b10cb16a",
+      "name": "IF - Property Matching Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        11664,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.propertyMatchUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-internal-secret",
+              "value": "={{$json.config.n8nInternalSecret}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { event_id: $json.event.event_id, organization_id: $json.event.organization_id, conversation_id: $json.event.conversation_id, contact_id: $json.event.contact_id, requirements: $json.qualification.requirements, limit: 3 } }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 45000
+        }
+      },
+      "id": "83e47ace-c023-4108-a279-205f5852cd01",
+      "name": "Property Matching Agent - Find Available Listings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        11920,
+        21600
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Lead Qualification Agent - Score & Classify').first().json;\nconst response = $input.first().json || {};\nconst rawMatches = response.matches || response.data?.matches || response.properties || response.data?.properties || [];\n\nconst matches = Array.isArray(rawMatches)\n  ? rawMatches.slice(0, 3).map((item) => ({\n      id: String(item.id || ''),\n      title: String(item.title || item.name || 'Property').slice(0, 160),\n      locality: String(item.locality || item.location || '').slice(0, 120),\n      city: String(item.city || '').slice(0, 80),\n      price: item.price ?? item.price_amount ?? null,\n      currency: String(item.currency || lead.qualification.requirements.currency || 'INR').slice(0, 8),\n      property_type: String(item.property_type || '').slice(0, 40),\n      bedrooms: Number.isFinite(Number(item.bedrooms)) ? Number(item.bedrooms) : null,\n      listing_intent: String(item.listing_intent || item.listing_type || '').slice(0, 20),\n      match_score: Number.isFinite(Number(item.match_score)) ? Number(item.match_score) : null,\n      matching_reasons: Array.isArray(item.matching_reasons) ? item.matching_reasons.slice(0, 5).map(String) : [],\n    }))\n    .filter((item) => item.id)\n  : [];\n\nconst activity = {\n  agent_type: 'property_matching',\n  action_type: 'properties_matched',\n  reason: 'Organization-scoped property inventory match',\n  input_summary: `Matched against captured requirements.`,\n  output_summary: matches.length ? `${matches.length} available property recommendation(s) created.` : 'No exact available property match found.',\n  confidence: 1,\n  related_entity_ids: { property_ids: matches.map((m) => m.id) },\n};\n\nreturn [{\n  json: {\n    ...lead,\n    property_matches: matches,\n    agent_activities: [...lead.agent_activities, activity],\n  }\n}];"
+      },
+      "id": "a80a549b-1559-40b2-9f4f-4272d15ae534",
+      "name": "Merge Property Matching Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12176,
+        21600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst text = String(input.event.message_text || '').trim();\nconst lower = text.toLowerCase();\nconst intent = input.orchestrator.intent;\nconst q = input.qualification;\nconst context = input.context || {};\nconst orgName = context.organization?.name || 'our real-estate team';\nconst automationMode = String(context.conversation?.automation_mode || '').trim().toLowerCase();\nconst humanOwnedModes = new Set(['human', 'manual', 'paused', 'off', 'disabled']);\nconst humanHandoffBlocksAutomation = context.conversation?.handoff_active === true && (humanOwnedModes.has(automationMode) || !automationMode);\nconst agentModeActive = automationMode === 'agent';\n\nconst sensitiveKeywords = /\\b(legal|lawyer|loan|finance|mortgage|negotia|complaint|fraud|urgent|refund|abuse)\\b/i.test(lower);\nconst explicitHuman = intent === 'human_support' || /\\b(human|agent|person|executive|broker|call me)\\b/i.test(lower);\nconst appointmentIntent = ['appointment_request', 'appointment_change'].includes(intent);\n\n// Agent mode means the AI agent is allowed to continue responding.\n// Do NOT create/refresh human handoff just because confidence is low, a lead is hot,\n// or the customer asks for a site visit. Those should become CRM tasks/appointment requests\n// while the agent still sends a useful reply. Only truly human/sensitive cases create handoff.\nconst forcedHumanReason =\n  intent === 'complaint_or_sensitive' ? 'Sensitive or complaint enquiry' :\n  explicitHuman ? 'Customer requested a human agent' :\n  sensitiveKeywords ? 'Sensitive domain request' :\n  null;\nconst needsHuman = Boolean(forcedHumanReason);\nconst notifyHumanWithoutBlocking = Boolean(\n  appointmentIntent ||\n  q.lead_category === 'hot' ||\n  input.orchestrator.confidence < 0.45 ||\n  input.orchestrator.requires_human\n);\n\nconst handoffReason = forcedHumanReason;\n\nlet appointmentRequest = null;\nif (appointmentIntent) {\n  appointmentRequest = {\n    action: 'create_or_update_request',\n    status: 'requested',\n    preferred_at: q.requirements.preferred_appointment_at || null,\n    property_reference: q.requirements.property_reference || null,\n    property_id: null,\n    notes: 'Customer requested a site visit or appointment. Human confirmation is required.',\n  };\n}\n\nlet followUpTask = null;\nif (!input.is_opt_out_request && !context.contact?.opted_out && !humanHandoffBlocksAutomation) {\n  if (q.lead_category === 'hot' && !appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Hot lead without a confirmed site visit',\n      due_in_hours: input.config.hotFollowupHours,\n      priority: 'high',\n    };\n  } else if (q.missing_fields.length && ['property_search', 'requirements_update', 'general_enquiry'].includes(intent)) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Incomplete lead qualification',\n      due_in_hours: input.config.defaultFollowupHours,\n      priority: q.lead_category === 'warm' ? 'normal' : 'low',\n    };\n  } else if (input.property_matches.length && !appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Property recommendations sent without a site-visit request',\n      due_in_hours: input.config.defaultFollowupHours,\n      priority: q.lead_category === 'hot' ? 'high' : 'normal',\n    };\n  }\n}\n\nfunction formatPrice(match) {\n  if (match.price === null || match.price === undefined || match.price === '') return '';\n  const value = Number(match.price);\n  if (!Number.isFinite(value)) return '';\n  return `${match.currency || 'INR'} ${value.toLocaleString('en-IN')}`;\n}\n\nfunction propertyReply(matches) {\n  if (!matches.length) {\n    return `I could not find an exact currently available match yet. Which requirement can be flexible: locality, budget, or property type?`;\n  }\n  const lines = matches.map((m, index) => {\n    const parts = [m.title, m.locality || m.city, m.bedrooms ? `${m.bedrooms} BHK` : '', formatPrice(m)].filter(Boolean);\n    return `${index + 1}. ${parts.join(' — ')}`;\n  });\n  return `I found ${matches.length} currently available option${matches.length > 1 ? 's' : ''} that may fit your requirement:\\n${lines.join('\\n')}\\n\\nReply with a property number or ask to book a site visit.`;\n}\n\nconst menuPayload = {\n  type: 'button',\n  body: { text: `Welcome to ${orgName}. What would you like to do?` },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'find_property', title: 'Find Property' } },\n      { type: 'reply', reply: { id: 'book_site_visit', title: 'Book Site Visit' } },\n      { type: 'reply', reply: { id: 'talk_to_agent', title: 'Talk to Agent' } },\n    ],\n  },\n};\n\n// Interactive WhatsApp reply buttons. Requires Real Estate AI Agent backend send-message support for message_type='interactive'.\nconst menuText = `Welcome to ${orgName}. What would you like to do?`;\n\nlet messageType = 'text';\nlet rawWhatsappPayload = null;\nlet reply = '';\nlet shouldSend = !context.contact?.opted_out && !humanHandoffBlocksAutomation;\n\nif (input.is_opt_out_request) {\n  reply = 'You have been opted out of automated follow-ups. Reply START any time to resume messages.';\n  shouldSend = true;\n} else if (humanHandoffBlocksAutomation) {\n  shouldSend = false;\n} else if (intent === 'general_enquiry' && !q.can_match_properties) {\n  messageType = 'interactive';\n  rawWhatsappPayload = menuPayload;\n  reply = menuText;\n} else if (appointmentIntent) {\n  reply = `I have recorded your site-visit request. Please share your preferred date/time and property/location, and I will help coordinate available internal CRM slots.`;\n} else if (intent === 'human_support' || intent === 'complaint_or_sensitive' || needsHuman) {\n  reply = `I have notified a ${orgName} team member so they can assist you.`;\n} else if (intent === 'unknown' || input.orchestrator.confidence < 0.45) {\n  messageType = 'interactive';\n  rawWhatsappPayload = menuPayload;\n  reply = menuText;\n} else if (input.property_matches.length || q.can_match_properties) {\n  reply = propertyReply(input.property_matches);\n} else if (q.missing_fields.length) {\n  reply = `To suggest suitable properties, please share your ${q.missing_fields.slice(0, 2).join(' and ')}.`;\n} else {\n  reply = input.orchestrator.customer_reply_hint || `Please tell me your preferred location, budget, property type, and buying or renting timeline.`;\n}\n\nconst activities = [...input.agent_activities];\nif (context.conversation?.handoff_active === true && agentModeActive) {\n  activities.push({\n    agent_type: 'preflight',\n    action_type: 'stale_handoff_ignored',\n    reason: 'Conversation automation_mode is agent, so n8n continues even though handoff_active is true.',\n    input_summary: `automation_mode=${automationMode}; handoff_active=true`,\n    output_summary: 'Agent automation allowed to respond.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (input.property_matches.length || q.can_match_properties) {\n  activities.push({\n    agent_type: 'property_matching',\n    action_type: input.property_matches.length ? 'recommendations_prepared' : 'no_exact_match',\n    reason: 'Property-match result evaluated',\n    input_summary: 'Qualification criteria passed to matching service.',\n    output_summary: input.property_matches.length ? `${input.property_matches.length} property options prepared for customer.` : 'No exact available option returned.',\n    confidence: 1,\n    related_entity_ids: { property_ids: input.property_matches.map((m) => m.id) },\n  });\n}\nif (appointmentRequest) {\n  activities.push({\n    agent_type: 'appointment',\n    action_type: 'appointment_requested',\n    reason: 'Customer requested a site visit or appointment',\n    input_summary: 'Appointment request captured.',\n    output_summary: 'Status set to requested; no confirmation promised.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (followUpTask) {\n  activities.push({\n    agent_type: 'followup',\n    action_type: 'followup_task_created',\n    reason: followUpTask.reason,\n    input_summary: `Due in ${followUpTask.due_in_hours} hours.`,\n    output_summary: `Priority: ${followUpTask.priority}.`,\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (notifyHumanWithoutBlocking && !needsHuman) {\n  activities.push({\n    agent_type: 'routing',\n    action_type: 'agent_mode_nonblocking_attention',\n    reason: appointmentIntent ? 'Appointment/site-visit interest' : q.lead_category === 'hot' ? 'Hot lead attention' : 'Low confidence but agent mode remains active',\n    input_summary: `Intent: ${intent}. Lead category: ${q.lead_category}. automation_mode=${automationMode}.`,\n    output_summary: 'No human handoff created; agent automation remains allowed to reply.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (needsHuman) {\n  activities.push({\n    agent_type: 'escalation',\n    action_type: 'human_handoff_created',\n    reason: handoffReason || 'Escalation rule matched',\n    input_summary: `Intent: ${intent}. Lead category: ${q.lead_category}.`,\n    output_summary: 'Conversation automation will pause after handoff is committed.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\n\nreturn [{\n  json: {\n    ...input,\n    appointment_request: appointmentRequest,\n    follow_up_task: followUpTask,\n    handoff: needsHuman ? { required: true, reason: handoffReason || 'Escalation rule matched', priority: q.lead_category === 'hot' ? 'high' : 'normal' } : { required: false, clear_if_agent_mode: agentModeActive },\n    conversation_update: agentModeActive ? { automation_mode: 'agent', clear_handoff_active: true, reason: 'Agent mode must be allowed to respond from n8n.' } : null,\n    outbound_message: {\n      send: Boolean(shouldSend && reply),\n      message_type: messageType,\n      content_text: reply,\n      raw_whatsapp_payload: rawWhatsappPayload,\n    },\n    agent_activities: activities,\n  }\n}];"
+      },
+      "id": "4bc8b973-a493-46a4-9eef-d83c2aae8027",
+      "name": "Appointment, Follow-up & Escalation Agents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12432,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nfunction cleanId(value) {\n  return String(value ?? '').trim();\n}\n\nconst event = {\n  event_id: cleanId(input.event?.event_id),\n  event_type: cleanId(input.event?.event_type || 'whatsapp.inbound_message'),\n  organization_id: cleanId(input.event?.organization_id || input.context?.organization?.id),\n  conversation_id: cleanId(input.event?.conversation_id || input.context?.conversation?.id),\n  contact_id: cleanId(input.event?.contact_id || input.context?.contact?.id),\n  message_id: input.event?.message_id || input.event?.event_id || null,\n  received_at: input.event?.received_at || new Date().toISOString(),\n};\n\nif (!event.event_id) throw new Error('Cannot build agent plan: event_id is missing.');\nif (!event.organization_id) throw new Error('Cannot build agent plan: organization_id is missing after context merge.');\nif (!event.conversation_id) throw new Error('Cannot build agent plan: conversation_id is missing after context merge.');\nif (!event.contact_id) throw new Error('Cannot build agent plan: contact_id is missing after context merge.');\n\nconst sanitizeMatch = (m) => ({\n  property_id: m.id,\n  match_score: m.match_score,\n  matching_reasons: m.matching_reasons,\n});\n\nconst plan = {\n  // Top-level fields are intentionally duplicated because the Real Estate AI Agent backend may resolve tenant scope\n  // from the root payload before reading the nested event object.\n  organization_id: event.organization_id,\n  conversation_id: event.conversation_id,\n  contact_id: event.contact_id,\n  event_id: event.event_id,\n  message_id: event.message_id,\n\n  idempotency_key: `n8n:real-estate:v2:${event.event_id}`,\n  event,\n  requirements: input.qualification.requirements,\n  lead_score: {\n    score: input.qualification.score,\n    category: input.qualification.lead_category,\n    breakdown: input.qualification.score_breakdown,\n    explanation: input.qualification.summary,\n  },\n  pipeline_update: {\n    requested_stage: input.qualification.pipeline_stage,\n    reason: input.qualification.summary,\n    source: 'n8n_real_estate_agent_v2',\n  },\n  property_recommendations: input.property_matches.map(sanitizeMatch),\n  appointment_request: input.appointment_request ? {\n    ...input.appointment_request,\n    requested_start_at: input.appointment_request.preferred_at || null,\n  } : null,\n  follow_up_task: input.follow_up_task ? {\n    ...input.follow_up_task,\n    due_at: new Date(Date.now() + Number(input.follow_up_task.due_in_hours || 24) * 60 * 60 * 1000).toISOString(),\n  } : null,\n  human_handoff: input.handoff,\n  conversation_update: input.conversation_update || null,\n  allow_agent_mode_send: input.context?.conversation?.automation_mode === 'agent',\n  opt_out: input.is_opt_out_request ? { requested: true, source: 'whatsapp_keyword' } : null,\n  activity_logs: input.agent_activities.map((a, i) => ({\n    ...a,\n    organization_id: event.organization_id,\n    conversation_id: event.conversation_id,\n    contact_id: event.contact_id,\n    idempotency_key: `n8n:activity:${event.event_id}:${a.agent_type}:${a.action_type}:${i}`,\n    input_summary: String(a.input_summary || '').slice(0, 500),\n    output_summary: String(a.output_summary || '').slice(0, 500),\n  })),\n  outbound_message: {\n    idempotency_key: `n8n:outbound:${event.event_id}`,\n    organization_id: event.organization_id,\n    conversation_id: event.conversation_id,\n    contact_id: event.contact_id,\n    send: input.outbound_message.send,\n    message_type: input.outbound_message.message_type,\n    content_text: String(input.outbound_message.content_text || '').slice(0, 3500),\n    raw_whatsapp_payload: input.outbound_message.raw_whatsapp_payload,\n  },\n};\n\nreturn [{\n  json: {\n    event,\n    config: input.config,\n    outbound_message: plan.outbound_message,\n    agent_plan: plan,\n  }\n}];"
+      },
+      "id": "295b4f33-d79c-4ec9-922a-f6933da474b6",
+      "name": "Build Durable Multi-Agent Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12704,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.agentPlanUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-internal-secret",
+              "value": "={{$json.config.n8nInternalSecret}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.agent_plan) }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 45000
+        }
+      },
+      "id": "87b8252a-fc0b-4878-ad50-dc1ac93e6b80",
+      "name": "Real Estate AI Agent - Commit Tenant-Scoped Agent Plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        12960,
+        21696
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('Build Durable Multi-Agent Plan').first().json;\nconst response = $input.first().json || {};\nconst commit = response.data || response;\n\nconst planOrg = String(plan.event.organization_id || plan.agent_plan?.organization_id || '').trim();\nconst commitOrg = String(commit.organization_id || commit.organization?.id || '').trim();\n\nif (commitOrg && planOrg && commitOrg !== planOrg) {\n  throw new Error(`Committed agent plan returned an organization mismatch. plan=${planOrg} commit=${commitOrg}`);\n}\n\nreturn [{\n  json: {\n    ...plan,\n    commit_result: commit,\n  }\n}];"
+      },
+      "id": "14115cb6-0c86-4b2c-aa0c-15b3abcbde7a",
+      "name": "Merge Agent Plan Commit Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13216,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.outbound_message.send === true && $json.commit_result.send_allowed === true && !!$json.outbound_message.content_text}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "a4fcedbf-ea85-4263-93ae-934e18941468",
+      "name": "IF - Send Customer Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        13472,
+        21696
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.internalSendUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-internal-secret",
+              "value": "={{$json.config.n8nInternalSecret}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ organization_id: $json.event.organization_id, conversation_id: $json.event.conversation_id, contact_id: $json.event.contact_id, idempotency_key: $json.outbound_message.idempotency_key, message_type: $json.outbound_message.message_type, content_text: $json.outbound_message.content_text, raw_whatsapp_payload: $json.outbound_message.raw_whatsapp_payload, source: 'n8n_real_estate_multi_agent', allow_agent_mode_send: true, clear_stale_handoff_if_agent_mode: true }) }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "8461f68e-806b-4ec7-af39-ce198d3266c2",
+      "name": "Real Estate AI Agent - Send Customer Reply & Sync Inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        13744,
+        21584
+      ],
+      "retryOnFail": false,
+      "maxTries": 1,
+      "waitBetweenTries": 0
+    },
+    {
+      "parameters": {
+        "jsCode": "const merged = $('Merge Agent Plan Commit Result').first().json;\nconst delivery = $input.first().json || {};\n\nreturn [{\n  json: {\n    event: merged.event,\n    config: merged.config,\n    outcome: {\n      status: 'sent',\n      outbound_idempotency_key: merged.outbound_message.idempotency_key,\n      delivery_reference: String(delivery.message_id || delivery.id || delivery.data?.message_id || '').slice(0, 160) || null,\n    },\n  }\n}];"
+      },
+      "id": "fcab2b33-fa44-487e-bd7e-9de50b720e6d",
+      "name": "Build Event Outcome - Customer Reply Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14000,
+        21584
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const merged = $input.first().json;\n\nreturn [{\n  json: {\n    event: merged.event,\n    config: merged.config,\n    outcome: {\n      status: 'committed_without_customer_reply',\n      outbound_idempotency_key: merged.outbound_message.idempotency_key,\n      delivery_reference: null,\n    },\n  }\n}];"
+      },
+      "id": "0932e2cd-981b-4402-b80b-af3691284bfc",
+      "name": "Build Event Outcome - No Reply Needed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13744,
+        21824
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.eventStatusUrl}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-internal-secret",
+              "value": "={{$json.config.n8nInternalSecret}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { event_id: $json.event.event_id, organization_id: $json.event.organization_id, idempotency_key: 'n8n:complete:' + $json.event.event_id, outcome: $json.outcome } }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "3d4409bf-4b9a-45a8-9973-e3bcf8912b59",
+      "name": "Real Estate AI Agent - Complete n8n Event Delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        14256,
+        21696
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "content": "# v3 FIXES\n\nThis export fixes the n8n HTTP Request body issue where internal Real Estate AI Agent routes received `{}` and returned `event is required`.\n\nChanges:\n- CONFIG node now hard-preserves the normalized `event` and throws a clear error if missing.\n- Internal Real Estate AI Agent HTTP Request nodes use `JSON.stringify(...)` for JSON Body, so n8n sends a real request body.\n- Keep `HUYGEN_BASE_URL=https://whatsapp-crm-v021.onrender.com` and matching `N8N_INTERNAL_SECRET` on both CRM and n8n.\n\nAfter import: activate workflow, then send a manual webhook test.",
+        "height": 360,
+        "width": 600,
+        "color": 7
+      },
+      "id": "4c92cdaa-fc31-4022-a68e-e30e7fc965c4",
+      "name": "V3 FIX NOTES",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        9024,
+        22000
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# v4 import note\n\nThis version fixes the previous `Normalized event is missing before CONFIG` and empty `{}` HTTP body issues.\n\nTest webhook body example:\n```json\n{\n  \"secret\": \"<N8N_INBOUND_SECRET>\",\n  \"event_id\": \"test-001\",\n  \"message_text\": \"Looking for 200 sq yd plot in Hyderabad under 80 lakh\",\n  \"customer_phone\": \"917993406266\",\n  \"customer_name\": \"Test Lead\"\n}\n```\n\nRequired env vars:\n- N8N_INBOUND_SECRET\n- N8N_INTERNAL_SECRET\n- HUYGEN_BASE_URL=https://whatsapp-crm-v021.onrender.com\n- OPENAI_API_KEY\n\nRotate any exposed API keys/secrets before production.",
+        "height": 420,
+        "width": 560,
+        "color": 3
+      },
+      "id": "291895cb-1367-497b-8733-cbc047ea6320",
+      "name": "V4 FIX NOTES",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        9040,
+        21920
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# v11 notes — interactive buttons + no duplicate send retries\n\nThis workflow sends WhatsApp menu replies as `message_type: interactive` with `raw_whatsapp_payload.type: button`.\n\nBackend requirement:\n`POST /api/internal/n8n/send-message` must support `message_type = interactive` and map it to Meta WhatsApp interactive button payload.\n\nThe send node intentionally has retry disabled. If the backend sends to Meta and then fails to save the message, retrying from n8n can send duplicate WhatsApp messages. Backend must implement idempotency before Meta send and save the CRM inbox record safely.",
+        "height": 420,
+        "width": 560,
+        "color": 3
+      },
+      "id": "d87ef056-9114-42c4-97dc-772fff440b07",
+      "name": "V11 — INTERACTIVE BUTTONS + NO SEND RETRY",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        13536,
+        21136
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Real Estate AI Agent Real Estate Inbound": {
+      "main": [
+        [
+          {
+            "node": "Normalize + Authenticate Real Estate AI Agent Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize + Authenticate Real Estate AI Agent Event": {
+      "main": [
+        [
+          {
+            "node": "CONFIG - Read Render Environment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG - Read Render Environment": {
+      "main": [
+        [
+          {
+            "node": "Real Estate AI Agent - Get Secure CRM Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Estate AI Agent - Get Secure CRM Context": {
+      "main": [
+        [
+          {
+            "node": "Merge Secure CRM Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Secure CRM Context": {
+      "main": [
+        [
+          {
+            "node": "Preflight - Idempotency & Automation Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preflight - Idempotency & Automation Guard": {
+      "main": [
+        [
+          {
+            "node": "IF - Skip Duplicate or Paused Conversation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Skip Duplicate or Paused Conversation?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "AI - Conversation Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Conversation Orchestrator": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Orchestrator Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Orchestrator Output": {
+      "main": [
+        [
+          {
+            "node": "Lead Qualification Agent - Score & Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Qualification Agent - Score & Classify": {
+      "main": [
+        [
+          {
+            "node": "IF - Property Matching Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Property Matching Needed?": {
+      "main": [
+        [
+          {
+            "node": "Property Matching Agent - Find Available Listings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Appointment, Follow-up & Escalation Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Property Matching Agent - Find Available Listings": {
+      "main": [
+        [
+          {
+            "node": "Merge Property Matching Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Property Matching Result": {
+      "main": [
+        [
+          {
+            "node": "Appointment, Follow-up & Escalation Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointment, Follow-up & Escalation Agents": {
+      "main": [
+        [
+          {
+            "node": "Build Durable Multi-Agent Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Durable Multi-Agent Plan": {
+      "main": [
+        [
+          {
+            "node": "Real Estate AI Agent - Commit Tenant-Scoped Agent Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Estate AI Agent - Commit Tenant-Scoped Agent Plan": {
+      "main": [
+        [
+          {
+            "node": "Merge Agent Plan Commit Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Agent Plan Commit Result": {
+      "main": [
+        [
+          {
+            "node": "IF - Send Customer Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Send Customer Reply?": {
+      "main": [
+        [
+          {
+            "node": "Real Estate AI Agent - Send Customer Reply & Sync Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Event Outcome - No Reply Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Real Estate AI Agent - Send Customer Reply & Sync Inbox": {
+      "main": [
+        [
+          {
+            "node": "Build Event Outcome - Customer Reply Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Event Outcome - Customer Reply Sent": {
+      "main": [
+        [
+          {
+            "node": "Real Estate AI Agent - Complete n8n Event Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Event Outcome - No Reply Needed": {
+      "main": [
+        [
+          {
+            "node": "Real Estate AI Agent - Complete n8n Event Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "all"
+  },
+  "versionId": "5d484f7a-4cb9-460c-b4d0-d19aa73de748",
+  "meta": {
+    "instanceId": "94440bc73f284fef6c28659bfc5214d986a044025782c93d531ab6adc42624d7"
+  },
+  "nodeGroups": [],
+  "id": "McxMj9UV2AK6iCOa",
+  "tags": []
+}

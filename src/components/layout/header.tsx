@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 const pageTitles: Record<string, string> = {
+  "/agents": "AI Agent Team",
   "/dashboard": "Analytics",
   "/inbox": "Inbox",
   "/contacts": "Contacts",

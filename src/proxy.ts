@@ -9,6 +9,7 @@ const AUTH_ROUTES = new Set([
 ])
 
 export const PROTECTED_PAGE_PREFIXES = [
+  '/agents',
   '/dashboard',
   '/inbox',
   '/contacts',

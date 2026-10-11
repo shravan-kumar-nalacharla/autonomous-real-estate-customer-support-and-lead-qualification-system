@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
-import { isInternalRequestAuthorized, isUuid } from "@/lib/internal-secret";
-import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { NextResponse } from 'next/server';
+import { isInternalRequestAuthorized, isUuid } from '@/lib/internal-secret';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   getEventDuplicateState,
   resolveRealEstateContext,
-} from "@/lib/real-estate/n8n-context";
-import type { ParsedLeadRequirements } from "@/lib/real-estate/types";
+} from '@/lib/real-estate/n8n-context';
+import type { ParsedLeadRequirements } from '@/lib/real-estate/types';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -19,8 +19,16 @@ interface AgentPlanBody {
   lead_score?: {
     score?: number;
     category?: string;
-    breakdown?: JsonRecord;
+    breakdown?: unknown;
     explanation?: string;
+  };
+  /** Compatibility with the production n8n workflow's durable plan shape. */
+  lead_update?: {
+    requirements?: ParsedLeadRequirements;
+    score?: number;
+    category?: string;
+    score_breakdown?: unknown;
+    summary?: string;
   };
   property_recommendations?: Array<{
     property_id?: string;
@@ -32,11 +40,13 @@ interface AgentPlanBody {
     assigned_agent_id?: string | null;
     requested_start_at?: string | null;
     proposed_start_at?: string | null;
+    preferred_at?: string | null;
     notes?: string | null;
   };
   follow_up_task?: {
     reason?: string;
     due_at?: string;
+    due_in_hours?: number;
     assigned_agent_id?: string | null;
   };
   human_handoff?: {
@@ -44,6 +54,7 @@ interface AgentPlanBody {
     reason?: string;
     assigned_agent_id?: string | null;
   };
+  handoff?: AgentPlanBody['human_handoff'];
   activity_logs?: Array<{
     agent_type?: string;
     action_type?: string;
@@ -54,6 +65,7 @@ interface AgentPlanBody {
     related_entity_ids?: JsonRecord;
     idempotency_key?: string;
   }>;
+  agent_activity_logs?: AgentPlanBody['activity_logs'];
   pipeline_update?: { requested_stage?: string };
   conversation_update?: {
     automation_mode?: string;
@@ -61,42 +73,50 @@ interface AgentPlanBody {
   };
   allow_agent_mode_send?: boolean;
 }
-
 const PIPELINE_STAGES = new Set([
-  "new_enquiry",
-  "requirements_captured",
-  "qualified_warm",
-  "qualified_hot",
-  "property_matched",
-  "site_visit_requested",
-  "site_visit_proposed",
-  "site_visit_confirmed",
-  "negotiation",
-  "won",
-  "lost",
-  "human_handoff",
-  "opted_out",
+  'new_enquiry',
+  'requirements_captured',
+  'qualified_warm',
+  'qualified_hot',
+  'property_matched',
+  'site_visit_requested',
+  'site_visit_proposed',
+  'site_visit_confirmed',
+  'negotiation',
+  'won',
+  'lost',
+  'human_handoff',
+  'opted_out',
 ]);
 
 export async function POST(request: Request) {
   if (!isInternalRequestAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as AgentPlanBody | null;
-  if (!body?.idempotency_key) {
-    return NextResponse.json({ error: "idempotency_key is required" }, { status: 400 });
+  const rawBody = (await request
+    .json()
+    .catch(() => null)) as AgentPlanBody | null;
+  if (!rawBody?.idempotency_key) {
+    return NextResponse.json(
+      { error: 'idempotency_key is required' },
+      { status: 400 }
+    );
   }
+  const body = normalizeAgentPlanBody(rawBody);
 
   const db = supabaseAdmin();
   const resolved = await resolveRealEstateContext(db, body);
-  if ("error" in resolved) {
-    return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  if ('error' in resolved) {
+    return NextResponse.json(
+      { error: resolved.error },
+      { status: resolved.status }
+    );
   }
   if (!resolved.contact?.id || !resolved.conversation?.id) {
     return NextResponse.json(
-      { error: "conversation_id and contact_id are required or resolvable" },
-      { status: 400 },
+      { error: 'conversation_id and contact_id are required or resolvable' },
+      { status: 400 }
     );
   }
 
@@ -128,8 +148,8 @@ export async function POST(request: Request) {
   if (
     body.allow_agent_mode_send === true &&
     body.conversation_update?.clear_handoff_active === true &&
-    body.conversation_update.automation_mode === "agent" &&
-    resolved.conversation.automation_mode === "agent"
+    body.conversation_update.automation_mode === 'agent' &&
+    resolved.conversation.automation_mode === 'agent'
   ) {
     await clearStaleAgentModeHandoff({
       organizationId,
@@ -139,7 +159,7 @@ export async function POST(request: Request) {
 
   if (body.requirements) {
     const { data, error } = await db
-      .from("lead_requirements")
+      .from('lead_requirements')
       .upsert(
         {
           organization_id: organizationId,
@@ -148,18 +168,19 @@ export async function POST(request: Request) {
           ...toLeadRequirementRow(body.requirements),
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "organization_id,contact_id" },
+        { onConflict: 'organization_id,contact_id' }
       )
-      .select("id")
+      .select('id')
       .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error)
+      return NextResponse.json({ error: error.message }, { status: 500 });
     leadRequirementId = data.id;
   }
 
   if (body.lead_score) {
     const score = clampNumber(body.lead_score.score, 0, 100, 0);
     const { data, error } = await db
-      .from("lead_scores")
+      .from('lead_scores')
       .upsert(
         {
           organization_id: organizationId,
@@ -169,14 +190,16 @@ export async function POST(request: Request) {
           score,
           category: normalizeLeadCategory(body.lead_score.category, score),
           breakdown: body.lead_score.breakdown ?? {},
-          explanation: body.lead_score.explanation ?? "Scored by n8n lead plan.",
+          explanation:
+            body.lead_score.explanation ?? 'Scored by n8n lead plan.',
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "organization_id,contact_id" },
+        { onConflict: 'organization_id,contact_id' }
       )
-      .select("id")
+      .select('id')
       .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error)
+      return NextResponse.json({ error: error.message }, { status: 500 });
     leadScoreId = data.id;
   }
 
@@ -184,10 +207,10 @@ export async function POST(request: Request) {
     if (!isUuid(recommendation.property_id)) continue;
     const propertyOk = await propertyBelongsToOrg(
       recommendation.property_id,
-      organizationId,
+      organizationId
     );
     if (!propertyOk) continue;
-    await db.from("property_recommendations").upsert(
+    await db.from('property_recommendations').upsert(
       {
         organization_id: organizationId,
         contact_id: contactId,
@@ -196,68 +219,63 @@ export async function POST(request: Request) {
         match_score: clampNumber(recommendation.match_score, 0, 100, 0),
         matching_reasons: recommendation.matching_reasons ?? [],
       },
-      { onConflict: "organization_id,contact_id,property_id" },
+      { onConflict: 'organization_id,contact_id,property_id' }
     );
-    pipelineStage = pipelineStage ?? "property_matched";
+    pipelineStage = pipelineStage ?? 'property_matched';
   }
 
   if (body.appointment_request) {
     const propertyId = isUuid(body.appointment_request.property_id)
       ? body.appointment_request.property_id
       : null;
-    const { data, error } = await db
-      .from("appointments")
-      .upsert(
-        {
-          organization_id: organizationId,
-          contact_id: contactId,
-          conversation_id: conversationId,
-          property_id: propertyId,
-          assigned_agent_id: isUuid(body.appointment_request.assigned_agent_id)
-            ? body.appointment_request.assigned_agent_id
-            : null,
-          requested_start_at: body.appointment_request.requested_start_at ?? null,
-          proposed_start_at: body.appointment_request.proposed_start_at ?? null,
-          status: body.appointment_request.proposed_start_at ? "proposed" : "requested",
-          notes:
-            body.appointment_request.notes ??
-            "Customer requested a site visit through WhatsApp automation.",
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "organization_id,contact_id,property_id" },
-      )
-      .select("id, status")
-      .maybeSingle();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    appointmentId = data?.id ?? null;
+    const appointmentStatus = body.appointment_request.proposed_start_at
+      ? 'proposed'
+      : 'requested';
+    const { data, error } = await db.rpc('upsert_active_appointment', {
+      p_organization_id: organizationId,
+      p_contact_id: contactId,
+      p_conversation_id: conversationId,
+      p_property_id: propertyId,
+      p_assigned_agent_id: isUuid(body.appointment_request.assigned_agent_id)
+        ? body.appointment_request.assigned_agent_id
+        : null,
+      p_requested_start_at: body.appointment_request.requested_start_at ?? null,
+      p_proposed_start_at: body.appointment_request.proposed_start_at ?? null,
+      p_status: appointmentStatus,
+      p_notes:
+        body.appointment_request.notes ??
+        'Customer requested a site visit through WhatsApp automation.',
+    });
+    if (error)
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    appointmentId = typeof data === 'string' ? data : null;
     pipelineStage =
-      data?.status === "proposed" ? "site_visit_proposed" : "site_visit_requested";
+      appointmentStatus === 'proposed'
+        ? 'site_visit_proposed'
+        : 'site_visit_requested';
   }
 
   if (body.follow_up_task?.reason) {
-    await db.from("follow_up_tasks").upsert(
-      {
-        organization_id: organizationId,
-        contact_id: contactId,
-        conversation_id: conversationId,
-        assigned_agent_id: isUuid(body.follow_up_task.assigned_agent_id)
-          ? body.follow_up_task.assigned_agent_id
-          : null,
-        reason: body.follow_up_task.reason,
-        due_at:
-          body.follow_up_task.due_at ??
-          new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        status: "pending",
-        source: "n8n_agent_plan",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "organization_id,contact_id,reason" },
-    );
+    const { error } = await db.rpc('upsert_pending_follow_up', {
+      p_organization_id: organizationId,
+      p_contact_id: contactId,
+      p_conversation_id: conversationId,
+      p_assigned_agent_id: isUuid(body.follow_up_task.assigned_agent_id)
+        ? body.follow_up_task.assigned_agent_id
+        : null,
+      p_reason: body.follow_up_task.reason,
+      p_due_at:
+        body.follow_up_task.due_at ??
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      p_source: 'n8n_agent_plan',
+    });
+    if (error)
+      return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   if (body.human_handoff?.required) {
     const { data, error } = await db
-      .from("human_handoffs")
+      .from('human_handoffs')
       .insert({
         organization_id: organizationId,
         contact_id: contactId,
@@ -265,32 +283,32 @@ export async function POST(request: Request) {
         assigned_agent_id: isUuid(body.human_handoff.assigned_agent_id)
           ? body.human_handoff.assigned_agent_id
           : null,
-        reason: body.human_handoff.reason ?? "n8n_agent_plan_requested_handoff",
-        status: "open",
+        reason: body.human_handoff.reason ?? 'n8n_agent_plan_requested_handoff',
+        status: 'open',
       })
-      .select("id")
+      .select('id')
       .maybeSingle();
     if (!error) handoffId = data?.id ?? null;
-    pipelineStage = "human_handoff";
+    pipelineStage = 'human_handoff';
     await db
-      .from("conversations")
+      .from('conversations')
       .update({
-        automation_mode: "human",
+        automation_mode: 'human',
         automation_paused: true,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", conversationId)
-      .eq("organization_id", organizationId);
+      .eq('id', conversationId)
+      .eq('organization_id', organizationId);
   }
 
   for (const [index, log] of (body.activity_logs ?? []).entries()) {
-    await db.from("agent_activity_logs").upsert(
+    await db.from('agent_activity_logs').upsert(
       {
         organization_id: organizationId,
         contact_id: contactId,
         conversation_id: conversationId,
         agent_type: normalizeAgentType(log.agent_type),
-        action_type: log.action_type || "n8n_agent_plan_applied",
+        action_type: log.action_type || 'n8n_agent_plan_applied',
         input_summary: log.input_summary,
         output_summary: log.output_summary,
         reason: log.reason,
@@ -299,31 +317,31 @@ export async function POST(request: Request) {
         idempotency_key:
           log.idempotency_key ?? `${body.idempotency_key}:activity:${index}`,
       },
-      { onConflict: "organization_id,idempotency_key", ignoreDuplicates: true },
+      { onConflict: 'organization_id,idempotency_key', ignoreDuplicates: true }
     );
   }
 
   if (pipelineStage) {
     await db
-      .from("conversations")
+      .from('conversations')
       .update({
         pipeline_stage: pipelineStage,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", conversationId)
-      .eq("organization_id", organizationId);
+      .eq('id', conversationId)
+      .eq('organization_id', organizationId);
   }
 
-  await db.from("n8n_event_statuses").upsert(
+  await db.from('n8n_event_statuses').upsert(
     {
       organization_id: organizationId,
       event_id: body.event_id ?? body.idempotency_key,
       idempotency_key: body.idempotency_key,
-      status: "processing",
+      status: 'processing',
       outcome: { agent_plan_applied: true },
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "organization_id,event_id" },
+    { onConflict: 'organization_id,event_id' }
   );
 
   const sendAllowed = await computeSendAllowed(db, {
@@ -345,17 +363,71 @@ export async function POST(request: Request) {
   });
 }
 
+/**
+ * Normalizes the checked-in API contract and the production n8n v11 plan.
+ * Keeping aliases at this boundary lets existing workflow executions remain
+ * replayable while the backend stores one canonical shape.
+ */
+export function normalizeAgentPlanBody(
+  body: AgentPlanBody,
+  now = Date.now()
+): AgentPlanBody {
+  const leadUpdate = body.lead_update;
+  const preferredAt = normalizeTimestamp(
+    body.appointment_request?.preferred_at
+  );
+  const dueInHours = clampNumber(body.follow_up_task?.due_in_hours, 1, 168, 24);
+
+  return {
+    ...body,
+    requirements: body.requirements ?? leadUpdate?.requirements,
+    lead_score:
+      body.lead_score ??
+      (leadUpdate
+        ? {
+            score: leadUpdate.score,
+            category: leadUpdate.category,
+            breakdown: leadUpdate.score_breakdown,
+            explanation: leadUpdate.summary,
+          }
+        : undefined),
+    appointment_request: body.appointment_request
+      ? {
+          ...body.appointment_request,
+          requested_start_at:
+            body.appointment_request.requested_start_at ?? preferredAt,
+        }
+      : undefined,
+    follow_up_task: body.follow_up_task
+      ? {
+          ...body.follow_up_task,
+          due_at:
+            body.follow_up_task.due_at ??
+            new Date(now + dueInHours * 60 * 60 * 1000).toISOString(),
+        }
+      : undefined,
+    human_handoff: body.human_handoff ?? body.handoff,
+    activity_logs: body.activity_logs ?? body.agent_activity_logs,
+  };
+}
+
+function normalizeTimestamp(value?: string | null) {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
 function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
   return {
-    customer_role: requirements.customer_role ?? "unknown",
-    listing_intent: requirements.listing_intent ?? "unknown",
-    property_category: requirements.property_category ?? "unknown",
-    property_type: requirements.property_type ?? "unknown",
-    property_stage: requirements.property_stage ?? "unknown",
+    customer_role: requirements.customer_role ?? 'unknown',
+    listing_intent: requirements.listing_intent ?? 'unknown',
+    property_category: requirements.property_category ?? 'unknown',
+    property_type: requirements.property_type ?? 'unknown',
+    property_stage: requirements.property_stage ?? 'unknown',
     preferred_locations: requirements.preferred_locations ?? [],
     budget_min: requirements.budget_min ?? null,
     budget_max: requirements.budget_max ?? null,
-    currency: requirements.currency ?? "INR",
+    currency: requirements.currency ?? 'INR',
     bedrooms: requirements.bedrooms ?? requirements.bedroom_count ?? null,
     bedroom_count: requirements.bedroom_count ?? requirements.bedrooms ?? null,
     bathrooms: requirements.bathrooms ?? null,
@@ -367,12 +439,17 @@ function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
     approval_authority: requirements.approval_authority ?? null,
     rera_id: requirements.rera_id ?? null,
     possession_timeline: requirements.possession_timeline ?? null,
-    buying_timeline: requirements.buying_timeline ?? requirements.timeline ?? null,
+    buying_timeline:
+      requirements.buying_timeline ?? requirements.timeline ?? null,
     timeline: requirements.timeline ?? null,
     financing_required:
-      requirements.financing_required ?? requirements.financing_interest ?? null,
+      requirements.financing_required ??
+      requirements.financing_interest ??
+      null,
     financing_interest:
-      requirements.financing_interest ?? requirements.financing_required ?? null,
+      requirements.financing_interest ??
+      requirements.financing_required ??
+      null,
     loan_preapproved: requirements.loan_preapproved ?? null,
     furnishing: requirements.furnishing ?? null,
     parking_required: requirements.parking_required ?? null,
@@ -385,10 +462,12 @@ function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
     seller_property_details: requirements.seller_property_details ?? {},
     listing_type:
       requirements.listing_type ??
-      (requirements.listing_intent === "rent" || requirements.listing_intent === "lease"
-        ? "rent"
-        : requirements.listing_intent === "buy" || requirements.listing_intent === "sell"
-          ? "sale"
+      (requirements.listing_intent === 'rent' ||
+      requirements.listing_intent === 'lease'
+        ? 'rent'
+        : requirements.listing_intent === 'buy' ||
+            requirements.listing_intent === 'sell'
+          ? 'sale'
           : null),
   };
 }
@@ -399,49 +478,60 @@ function normalizePipelineStage(stage?: string | null) {
 }
 
 function inferPipelineStage(body: AgentPlanBody) {
-  if (body.human_handoff?.required) return "human_handoff";
-  if (body.appointment_request?.proposed_start_at) return "site_visit_proposed";
-  if (body.appointment_request) return "site_visit_requested";
-  if (body.property_recommendations?.length) return "property_matched";
-  if (body.lead_score?.category === "hot") return "qualified_hot";
-  if (body.lead_score?.category === "warm") return "qualified_warm";
-  if (body.requirements) return "requirements_captured";
+  if (body.human_handoff?.required) return 'human_handoff';
+  if (body.appointment_request?.proposed_start_at) return 'site_visit_proposed';
+  if (body.appointment_request) return 'site_visit_requested';
+  if (body.property_recommendations?.length) return 'property_matched';
+  if (body.lead_score?.category === 'hot') return 'qualified_hot';
+  if (body.lead_score?.category === 'warm') return 'qualified_warm';
+  if (body.requirements) return 'requirements_captured';
   return null;
 }
 
 function normalizeLeadCategory(category: unknown, score: number) {
-  if (category === "hot" || category === "warm" || category === "cold") return category;
-  if (category === "general_enquiry") return category;
-  if (score >= 80) return "hot";
-  if (score >= 50) return "warm";
-  return "cold";
+  if (category === 'hot' || category === 'warm' || category === 'cold')
+    return category;
+  if (category === 'general_enquiry') return category;
+  if (score >= 80) return 'hot';
+  if (score >= 50) return 'warm';
+  return 'cold';
 }
 
 function normalizeAgentType(value: unknown) {
   const allowed = new Set([
-    "orchestrator",
-    "qualification",
-    "property_matching",
-    "appointment",
-    "followup",
-    "escalation",
-    "n8n_dispatch",
+    'orchestrator',
+    'qualification',
+    'property_matching',
+    'appointment',
+    'followup',
+    'escalation',
+    'n8n_dispatch',
   ]);
-  return typeof value === "string" && allowed.has(value) ? value : "orchestrator";
+  return typeof value === 'string' && allowed.has(value)
+    ? value
+    : 'orchestrator';
 }
 
-function clampNumber(value: unknown, min: number, max: number, fallback: number) {
-  const numeric = typeof value === "number" ? value : Number(value);
+function clampNumber(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number
+) {
+  const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(max, Math.max(min, numeric));
 }
 
-async function propertyBelongsToOrg(propertyId: string, organizationId: string) {
+async function propertyBelongsToOrg(
+  propertyId: string,
+  organizationId: string
+) {
   const { data } = await supabaseAdmin()
-    .from("properties")
-    .select("id")
-    .eq("id", propertyId)
-    .eq("organization_id", organizationId)
+    .from('properties')
+    .select('id')
+    .eq('id', propertyId)
+    .eq('organization_id', organizationId)
     .maybeSingle();
   return Boolean(data);
 }
@@ -453,50 +543,62 @@ async function computeSendAllowed(
     conversationId: string;
     contactId: string;
     duplicate: boolean;
-  },
+  }
 ) {
   if (args.duplicate) return false;
-  const [{ data: contact }, { data: conversation }, { data: latestInbound }, { data: template }] =
-    await Promise.all([
-      db
-        .from("contacts")
-        .select("opted_out")
-        .eq("id", args.contactId)
-        .eq("organization_id", args.organizationId)
-        .maybeSingle(),
-      db
-        .from("conversations")
-        .select("automation_mode, automation_paused, assigned_agent_id")
-        .eq("id", args.conversationId)
-        .eq("organization_id", args.organizationId)
-        .maybeSingle(),
-      db
-        .from("messages")
-        .select("created_at")
-        .eq("conversation_id", args.conversationId)
-        .eq("sender_type", "customer")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      db
-        .from("message_templates")
-        .select("id")
-        .eq("organization_id", args.organizationId)
-        .eq("status", "Approved")
-        .limit(1)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: contact },
+    { data: conversation },
+    { data: latestInbound },
+    { data: template },
+  ] = await Promise.all([
+    db
+      .from('contacts')
+      .select('opted_out')
+      .eq('id', args.contactId)
+      .eq('organization_id', args.organizationId)
+      .maybeSingle(),
+    db
+      .from('conversations')
+      .select('automation_mode, automation_paused, assigned_agent_id')
+      .eq('id', args.conversationId)
+      .eq('organization_id', args.organizationId)
+      .maybeSingle(),
+    db
+      .from('messages')
+      .select('created_at')
+      .eq('conversation_id', args.conversationId)
+      .eq('sender_type', 'customer')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    db
+      .from('message_templates')
+      .select('id')
+      .eq('organization_id', args.organizationId)
+      .eq('status', 'Approved')
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   if ((contact as { opted_out?: boolean } | null)?.opted_out) return false;
-  const conv = conversation as
-    | { automation_mode?: string; automation_paused?: boolean; assigned_agent_id?: string | null }
-    | null;
-  if (conv?.automation_mode === "human" || conv?.automation_paused || conv?.assigned_agent_id) {
+  const conv = conversation as {
+    automation_mode?: string;
+    automation_paused?: boolean;
+    assigned_agent_id?: string | null;
+  } | null;
+  if (
+    conv?.automation_mode === 'human' ||
+    conv?.automation_paused ||
+    conv?.assigned_agent_id
+  ) {
     return false;
   }
-  const inboundAt = (latestInbound as { created_at?: string } | null)?.created_at;
+  const inboundAt = (latestInbound as { created_at?: string } | null)
+    ?.created_at;
   if (!inboundAt) return Boolean(template);
-  const withinWindow = Date.now() - new Date(inboundAt).getTime() <= 24 * 60 * 60 * 1000;
+  const withinWindow =
+    Date.now() - new Date(inboundAt).getTime() <= 24 * 60 * 60 * 1000;
   return withinWindow || Boolean(template);
 }
 
@@ -506,23 +608,23 @@ async function clearStaleAgentModeHandoff(args: {
 }) {
   const db = supabaseAdmin();
   await db
-    .from("human_handoffs")
+    .from('human_handoffs')
     .update({
-      status: "cancelled",
+      status: 'cancelled',
       updated_at: new Date().toISOString(),
     })
-    .eq("organization_id", args.organizationId)
-    .eq("conversation_id", args.conversationId)
-    .in("status", ["open", "accepted"]);
+    .eq('organization_id', args.organizationId)
+    .eq('conversation_id', args.conversationId)
+    .in('status', ['open', 'accepted']);
 
   await db
-    .from("conversations")
+    .from('conversations')
     .update({
-      automation_mode: "agent",
+      automation_mode: 'agent',
       automation_paused: false,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", args.conversationId)
-    .eq("organization_id", args.organizationId)
-    .eq("automation_mode", "agent");
+    .eq('id', args.conversationId)
+    .eq('organization_id', args.organizationId)
+    .eq('automation_mode', 'agent');
 }

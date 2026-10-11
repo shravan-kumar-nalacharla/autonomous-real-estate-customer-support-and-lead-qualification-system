@@ -1,15 +1,16 @@
-"use client";
+'use client';
 
-import Image from "next/image";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/use-auth";
-import { useTotalUnread } from "@/hooks/use-total-unread";
+import Image from 'next/image';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth';
+import { useTotalUnread } from '@/hooks/use-total-unread';
 import {
   BarChart3,
   Building2,
+  Bot,
   CalendarClock,
   GitBranch,
   LogOut,
@@ -21,15 +22,15 @@ import {
   Workflow,
   X,
   Zap,
-} from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+} from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from '@/components/ui/dropdown-menu';
 
 interface NavItem {
   href: string;
@@ -39,22 +40,23 @@ interface NavItem {
 }
 
 const mainNavItems: NavItem[] = [
-  { href: "/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/contacts", label: "Contacts", icon: Users },
-  { href: "/properties", label: "Properties", icon: Building2 },
-  { href: "/appointments", label: "Appointments", icon: CalendarClock },
-  { href: "/pipelines", label: "Pipeline", icon: GitBranch },
-  { href: "/broadcasts", label: "Broadcasts", icon: Radio },
-  { href: "/automations", label: "Automations", icon: Workflow },
-  { href: "/dashboard", label: "Analytics", icon: BarChart3 },
+  { href: '/agents', label: 'AI Agent Team', icon: Bot, badge: '5' },
+  { href: '/inbox', label: 'Inbox', icon: MessageSquare },
+  { href: '/contacts', label: 'Contacts', icon: Users },
+  { href: '/properties', label: 'Properties', icon: Building2 },
+  { href: '/appointments', label: 'Appointments', icon: CalendarClock },
+  { href: '/pipelines', label: 'Pipeline', icon: GitBranch },
+  { href: '/broadcasts', label: 'Broadcasts', icon: Radio },
+  { href: '/automations', label: 'Automations', icon: Workflow },
+  { href: '/dashboard', label: 'Analytics', icon: BarChart3 },
 ];
 
 const automationNavItems: NavItem[] = [
-  { href: "/n8n-workflows", label: "n8n Workflows", icon: Zap, badge: "n8n" },
+  { href: '/n8n-workflows', label: 'n8n Workflows', icon: Zap, badge: 'n8n' },
 ];
 
 const bottomNavItems: NavItem[] = [
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 interface SidebarProps {
@@ -77,14 +79,14 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   useEffect(() => {
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    document.body.style.overflow = 'hidden';
     const onKeydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose?.();
+      if (event.key === 'Escape') onClose?.();
     };
-    window.addEventListener("keydown", onKeydown);
+    window.addEventListener('keydown', onKeydown);
     return () => {
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeydown);
+      window.removeEventListener('keydown', onKeydown);
     };
   }, [open, onClose]);
 
@@ -93,8 +95,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     const loadN8nState = async () => {
       try {
         const [settingsRes, workflowsRes] = await Promise.all([
-          fetch("/api/n8n/settings", { cache: "no-store" }),
-          fetch("/api/n8n/workflows", { cache: "no-store" }),
+          fetch('/api/n8n/settings', { cache: 'no-store' }),
+          fetch('/api/n8n/workflows', { cache: 'no-store' }),
         ]);
         if (!settingsRes.ok || !workflowsRes.ok || cancelled) return;
         const settingsJson = (await settingsRes.json()) as {
@@ -106,7 +108,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         if (cancelled) return;
         const connected = Boolean(settingsJson.settings?.is_connected);
         const hasActive = Boolean(
-          workflowsJson.workflows?.some((workflow) => workflow.is_active),
+          workflowsJson.workflows?.some((workflow) => workflow.is_active)
         );
         setN8nConnected(connected);
         setHasActiveWorkflows(hasActive);
@@ -129,19 +131,19 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     () =>
       profile?.full_name?.charAt(0)?.toUpperCase() ??
       profile?.email?.charAt(0)?.toUpperCase() ??
-      "U",
-    [profile?.email, profile?.full_name],
+      'U',
+    [profile?.email, profile?.full_name]
   );
 
   const isActiveRoute = (href: string) =>
-    pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+    pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
 
   const navItemClasses = (active: boolean) =>
     cn(
-      "flex w-full items-center gap-3 rounded-[var(--radius-md)] border-l-2 border-transparent px-3 py-2 text-[13px] transition-colors",
+      'flex w-full items-center gap-3 rounded-[var(--radius-md)] border-l-2 border-transparent px-3 py-2 text-[13px] transition-colors',
       active
-        ? "border-[var(--accent)] bg-[var(--bg-active)] font-medium text-[var(--text-primary)]"
-        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+        ? 'border-[var(--accent)] bg-[var(--bg-active)] font-medium text-[var(--text-primary)]'
+        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
     );
 
   return (
@@ -151,18 +153,18 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         aria-label="Close menu"
         onClick={onClose}
         className={cn(
-          "fixed inset-0 z-30 bg-[rgba(26,23,20,0.28)] backdrop-blur-[1px] transition-opacity lg:hidden",
+          'fixed inset-0 z-30 bg-[rgba(26,23,20,0.28)] backdrop-blur-[1px] transition-opacity lg:hidden',
           open
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0",
+            ? 'pointer-events-auto opacity-100'
+            : 'pointer-events-none opacity-0'
         )}
       />
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex h-full w-60 flex-col border-r border-[var(--border)] bg-[var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform",
-          open ? "translate-x-0" : "-translate-x-full",
-          "lg:static lg:z-0 lg:translate-x-0 lg:transition-none",
+          'fixed inset-y-0 left-0 z-40 flex h-full w-60 flex-col border-r border-[var(--border)] bg-[var(--bg-elevated)] transition-transform duration-200 ease-out will-change-transform',
+          open ? 'translate-x-0' : '-translate-x-full',
+          'lg:static lg:z-0 lg:translate-x-0 lg:transition-none'
         )}
         aria-label="Primary"
       >
@@ -170,13 +172,13 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <Link href="/dashboard" className="flex items-center gap-2">
             <Image
               src="/logo.svg"
-              alt="Huygen Warp"
+              alt="Real Estate AI Agent"
               width={28}
               height={28}
               className="h-7 w-7 rounded-[8px]"
             />
             <span className="truncate text-sm font-semibold text-[var(--text-primary)]">
-              Huygen Warp
+              Real Estate AI Agent
             </span>
           </Link>
           <button
@@ -195,16 +197,16 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               const active = isActiveRoute(item.href);
               const Icon = item.icon;
               const showUnreadDot =
-                item.href === "/inbox" && totalUnread > 0 && !active;
+                item.href === '/inbox' && totalUnread > 0 && !active;
               return (
                 <li key={item.href}>
                   <Link href={item.href} className={navItemClasses(active)}>
                     <Icon
                       className={cn(
-                        "h-4 w-4",
+                        'h-4 w-4',
                         active
-                          ? "text-[var(--accent)]"
-                          : "text-[var(--text-secondary)]",
+                          ? 'text-[var(--accent)]'
+                          : 'text-[var(--text-secondary)]'
                       )}
                     />
                     <span className="flex-1">{item.label}</span>
@@ -228,10 +230,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   <Link href={item.href} className={navItemClasses(active)}>
                     <Icon
                       className={cn(
-                        "h-4 w-4",
+                        'h-4 w-4',
                         active
-                          ? "text-[var(--n8n-orange)]"
-                          : "text-[var(--text-secondary)]",
+                          ? 'text-[var(--n8n-orange)]'
+                          : 'text-[var(--text-secondary)]'
                       )}
                     />
                     <span className="flex-1">{item.label}</span>
@@ -260,10 +262,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   <Link href={item.href} className={navItemClasses(active)}>
                     <Icon
                       className={cn(
-                        "h-4 w-4",
+                        'h-4 w-4',
                         active
-                          ? "text-[var(--accent)]"
-                          : "text-[var(--text-secondary)]",
+                          ? 'text-[var(--accent)]'
+                          : 'text-[var(--text-secondary)]'
                       )}
                     />
                     <span>{item.label}</span>
@@ -281,7 +283,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 {profile?.avatar_url ? (
                   <AvatarImage
                     src={profile.avatar_url}
-                    alt={profile.full_name ?? "Avatar"}
+                    alt={profile.full_name ?? 'Avatar'}
                   />
                 ) : null}
                 <AvatarFallback className="bg-[var(--accent-light)] text-sm font-medium text-[var(--accent)]">
@@ -290,10 +292,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               </Avatar>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                  {profile?.full_name ?? "User"}
+                  {profile?.full_name ?? 'User'}
                 </p>
                 <p className="truncate text-xs text-[var(--text-tertiary)]">
-                  {profile?.email ?? ""}
+                  {profile?.email ?? ''}
                 </p>
               </div>
             </DropdownMenuTrigger>
