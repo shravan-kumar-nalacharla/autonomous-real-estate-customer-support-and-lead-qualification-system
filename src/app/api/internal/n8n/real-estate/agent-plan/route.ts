@@ -417,7 +417,7 @@ function normalizeTimestamp(value?: string | null) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
+export function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
   return {
     customer_role: requirements.customer_role ?? 'unknown',
     listing_intent: requirements.listing_intent ?? 'unknown',
@@ -442,24 +442,29 @@ function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
     buying_timeline:
       requirements.buying_timeline ?? requirements.timeline ?? null,
     timeline: requirements.timeline ?? null,
-    financing_required:
-      requirements.financing_required ??
-      requirements.financing_interest ??
-      null,
-    financing_interest:
-      requirements.financing_interest ??
-      requirements.financing_required ??
-      null,
-    loan_preapproved: requirements.loan_preapproved ?? null,
+    financing_required: normalizeNullableBoolean(
+      requirements.financing_required ?? requirements.financing_interest
+    ),
+    financing_interest: normalizeNullableBoolean(
+      requirements.financing_interest ?? requirements.financing_required
+    ),
+    loan_preapproved: normalizeNullableBoolean(requirements.loan_preapproved),
     furnishing: requirements.furnishing ?? null,
-    parking_required: requirements.parking_required ?? null,
+    parking_required: normalizeNullableBoolean(requirements.parking_required),
     amenities: requirements.amenities ?? [],
-    site_visit_interest: requirements.site_visit_interest ?? false,
-    preferred_appointment_date: requirements.preferred_appointment_date ?? null,
+    site_visit_interest:
+      normalizeNullableBoolean(requirements.site_visit_interest) ?? false,
+    preferred_appointment_date: normalizeDate(
+      requirements.preferred_appointment_date
+    ),
     preferred_appointment_time: requirements.preferred_appointment_time ?? null,
-    preferred_appointment_at: requirements.preferred_appointment_at ?? null,
+    preferred_appointment_at: normalizeTimestamp(
+      requirements.preferred_appointment_at
+    ),
     property_reference: requirements.property_reference ?? null,
-    seller_property_details: requirements.seller_property_details ?? {},
+    seller_property_details: normalizeJsonObject(
+      requirements.seller_property_details
+    ),
     listing_type:
       requirements.listing_type ??
       (requirements.listing_intent === 'rent' ||
@@ -470,6 +475,31 @@ function toLeadRequirementRow(requirements: ParsedLeadRequirements) {
           ? 'sale'
           : null),
   };
+}
+
+function normalizeNullableBoolean(value: unknown): boolean | null {
+  if (value === true || value === false) return value;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (['yes', 'true', '1'].includes(normalized)) return true;
+  if (['no', 'false', '0'].includes(normalized)) return false;
+  return null;
+}
+
+function normalizeDate(value?: string | null): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(timestamp) ? value : null;
+}
+
+function normalizeJsonObject(value: unknown): JsonRecord {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as JsonRecord;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return { description: value.trim() };
+  }
+  return {};
 }
 
 function normalizePipelineStage(stage?: string | null) {

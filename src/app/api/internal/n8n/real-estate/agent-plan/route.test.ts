@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeAgentPlanBody } from './route';
+import { normalizeAgentPlanBody, toLeadRequirementRow } from './route';
 
 describe('normalizeAgentPlanBody', () => {
   it('maps the production n8n v11 plan into the canonical API shape', () => {
@@ -60,5 +60,27 @@ describe('normalizeAgentPlanBody', () => {
     expect(normalized.lead_score?.score).toBe(90);
     expect(normalized.human_handoff?.required).toBe(false);
     expect(normalized.activity_logs).toEqual([]);
+  });
+
+  it('normalizes n8n strings for typed Postgres columns', () => {
+    const row = toLeadRequirementRow({
+      financing_required: 'yes',
+      loan_preapproved: 'unknown',
+      parking_required: 'no',
+      site_visit_interest: 'yes',
+      preferred_appointment_date: 'tomorrow',
+      preferred_appointment_at: 'tomorrow morning',
+      seller_property_details: '3 BHK resale apartment',
+    } as never);
+
+    expect(row.financing_required).toBe(true);
+    expect(row.loan_preapproved).toBeNull();
+    expect(row.parking_required).toBe(false);
+    expect(row.site_visit_interest).toBe(true);
+    expect(row.preferred_appointment_date).toBeNull();
+    expect(row.preferred_appointment_at).toBeNull();
+    expect(row.seller_property_details).toEqual({
+      description: '3 BHK resale apartment',
+    });
   });
 });
