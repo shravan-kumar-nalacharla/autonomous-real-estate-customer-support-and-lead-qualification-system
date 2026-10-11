@@ -17,7 +17,7 @@ export async function GET(
   const { data: property, error } = await guard.supabase
     .from('properties')
     .select(
-      'id, title, property_type, listing_type, listing_intent, location, locality, bedrooms, price, media'
+      'id, title, property_type, listing_type, location, locality, bedrooms, price, media'
     )
     .eq('organization_id', guard.organizationId)
     .eq('id', propertyId)
@@ -37,7 +37,6 @@ export async function GET(
       requirements: {
         property_type: property.property_type,
         listing_type: property.listing_type,
-        listing_intent: property.listing_intent,
         bedrooms: property.bedrooms,
       },
       matches: [
