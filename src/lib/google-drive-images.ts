@@ -116,6 +116,9 @@ export async function listGoogleDriveImages(
     .json()
     .catch(() => ({}))) as DriveListResponse;
   if (!response.ok) {
+    if (folderId === DEFAULT_REAL_ESTATE_IMAGE_FOLDER_ID) {
+      return DEFAULT_REAL_ESTATE_IMAGES;
+    }
     throw new Error(
       payload.error?.message || `Google Drive returned HTTP ${response.status}`
     );

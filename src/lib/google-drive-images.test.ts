@@ -105,6 +105,25 @@ describe('Google Drive image library', () => {
     );
   });
 
+  it('uses the curated public images when the default folder API rejects the key', async () => {
+    const result = await listGoogleDriveImages({
+      apiKey: 'restricted-key',
+      fetcher: async () =>
+        Response.json(
+          { error: { message: 'API key not valid' } },
+          { status: 403 }
+        ),
+    });
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'demo-sale-villa-modern-exterior-01.jpg',
+        }),
+      ])
+    );
+  });
+
   it('downloads only images contained in the configured folder', async () => {
     const fetcher = async (input: string | URL | Request) => {
       const url = String(input);
