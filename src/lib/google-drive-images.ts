@@ -145,16 +145,18 @@ export function selectGoogleDriveImage(args: {
 
   const firstProperty = args.matches?.[0]?.property;
   const propertyType = normalize(
-    args.requirements.property_type ?? firstProperty?.property_type ?? ''
+    firstProperty?.property_type ?? args.requirements.property_type ?? ''
   );
   const listingIntent = normalize(
-    args.requirements.listing_intent ??
-      firstProperty?.listing_intent ??
+    firstProperty?.listing_intent ??
       firstProperty?.listing_type ??
+      args.requirements.listing_intent ??
       ''
   );
   const bedrooms =
-    args.requirements.bedrooms ?? args.requirements.bedroom_count;
+    firstProperty?.bedrooms ??
+    args.requirements.bedrooms ??
+    args.requirements.bedroom_count;
   const aliases = propertyAliases(propertyType);
   if (!aliases.length && bedrooms) {
     aliases.push('bedroom', 'livingroom', 'kitchen');
@@ -173,7 +175,7 @@ export function selectGoogleDriveImage(args: {
         bedrooms &&
         (name.includes(`${bedrooms}bhk`) || name.includes(`bedroom${bedrooms}`))
       )
-        score += 6;
+        score += 30;
       if (name.includes('exterior')) score += 1;
       return { file, score };
     })

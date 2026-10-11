@@ -44,6 +44,8 @@ export async function GET(
           property_id: property.id,
           match_score: 100,
           matching_reasons: [],
+          alternative_reasons: [],
+          is_exact_match: true,
           property: {
             ...property,
             media: Array.isArray(property.media) ? property.media : [],

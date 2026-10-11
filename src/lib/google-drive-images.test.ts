@@ -38,6 +38,8 @@ describe('Google Drive image library', () => {
             property_id: 'property-1',
             match_score: 90,
             matching_reasons: [],
+            alternative_reasons: [],
+            is_exact_match: true,
             property: {
               id: 'property-1',
               title: 'Villa',
@@ -68,6 +70,47 @@ describe('Google Drive image library', () => {
       file_id: 'bed-2',
       kind: 'representative',
     });
+  });
+
+  it('uses the matched alternative BHK for the image instead of the unavailable requested BHK', () => {
+    const result = selectGoogleDriveImage({
+      files: [
+        {
+          id: '2bhk',
+          name: 'demo-sale-apartment-2bhk-bedroom-01.jpg',
+          mimeType: 'image/jpeg',
+        },
+        {
+          id: '3bhk',
+          name: 'demo-sale-apartment-3bhk-interior-01.jpg',
+          mimeType: 'image/jpeg',
+        },
+      ],
+      requirements: { property_type: 'apartment', bedrooms: 2 },
+      matches: [
+        {
+          property_id: 'property-3bhk',
+          match_score: 80,
+          matching_reasons: [],
+          alternative_reasons: [
+            'closest available configuration is 3 BHK instead of 2 BHK',
+          ],
+          is_exact_match: false,
+          property: {
+            id: 'property-3bhk',
+            title: '3 BHK alternative',
+            property_type: 'apartment',
+            listing_type: 'sale',
+            location: 'Hyderabad',
+            locality: null,
+            bedrooms: 3,
+            price: 1,
+          },
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ file_id: '3bhk' });
   });
 
   it('lists only image files from the configured folder', async () => {

@@ -79,6 +79,145 @@ describe('production n8n workflow', () => {
     expect(result[0].json.orchestrator.requirements.listing_intent).toBe('buy');
   });
 
+  it('deterministically detects BHK and flat requests even when the AI omits them', () => {
+    const source = code('Parse & Validate Orchestrator Output');
+    const run = new Function('$input', '$', source);
+    const base = {
+      event: {
+        message_text: 'I need 2 bhk flat',
+        interactive_reply_id: '',
+      },
+      config: {},
+      context: { lead_requirements: {} },
+      is_opt_out_request: false,
+    };
+    const result = run(
+      {
+        first: () => ({
+          json: {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    intent: 'property_search',
+                    confidence: 0.8,
+                    extracted: {},
+                  }),
+                },
+              },
+            ],
+          },
+        }),
+      },
+      () => ({ first: () => ({ json: base }) })
+    ) as Array<{
+      json: {
+        orchestrator: {
+          requirements: {
+            bedrooms: number;
+            property_type: string;
+            property_category: string;
+            listing_intent: string;
+          };
+        };
+      };
+    }>;
+
+    expect(result[0].json.orchestrator.requirements).toMatchObject({
+      bedrooms: 2,
+      property_type: 'apartment',
+      property_category: 'residential',
+      listing_intent: 'unknown',
+    });
+    expect(JSON.stringify(workflow)).toContain(
+      '$json.qualification.requirements.property_type'
+    );
+  });
+
+  it('uses interactive buttons to qualify partial BHK and villa searches', () => {
+    const source = code('Appointment, Follow-up & Escalation Agents');
+    const run = (requirements: Record<string, unknown>) =>
+      new Function('$input', source)({
+        first: () => ({
+          json: {
+            event: { message_text: 'I need 2 bhk' },
+            config: { defaultFollowupHours: 24, hotFollowupHours: 2 },
+            context: {
+              contact: {},
+              conversation: { automation_mode: 'agent' },
+            },
+            orchestrator: {
+              intent: 'property_search',
+              confidence: 1,
+              requires_human: false,
+            },
+            is_opt_out_request: false,
+            qualification: {
+              requirements,
+              lead_category: 'cold',
+              can_match_properties: false,
+              missing_fields: [],
+            },
+            property_matches: [],
+            agent_activities: [],
+          },
+        }),
+      }) as Array<{
+        json: {
+          outbound_message: {
+            message_type: string;
+            content_text: string;
+            raw_whatsapp_payload: {
+              action: { buttons: Array<{ reply: { id: string } }> };
+            };
+          };
+        };
+      }>;
+
+    const intentQuestion = run({
+      bedrooms: 2,
+      property_type: 'unknown',
+      listing_intent: 'unknown',
+    })[0].json.outbound_message;
+    expect(intentQuestion.message_type).toBe('interactive');
+    expect(intentQuestion.content_text).toContain(
+      '2 BHK. Are you looking to buy or rent?'
+    );
+    expect(
+      intentQuestion.raw_whatsapp_payload.action.buttons.map(
+        (button) => button.reply.id
+      )
+    ).toEqual(['buy', 'rent', 'sell_lease']);
+
+    const propertyTypeQuestion = run({
+      bedrooms: 2,
+      property_type: 'unknown',
+      listing_intent: 'buy',
+    })[0].json.outbound_message;
+    expect(propertyTypeQuestion.message_type).toBe('interactive');
+    expect(
+      propertyTypeQuestion.raw_whatsapp_payload.action.buttons.map(
+        (button) => button.reply.id
+      )
+    ).toEqual(['apartment', 'villa', 'independent_house']);
+    const normalizeSource = code(
+      'Normalize + Authenticate Real Estate AI Agent Event'
+    );
+    expect(normalizeSource).toContain("'flat/apartment': 'apartment'");
+    expect(normalizeSource).toContain("'villa': 'villa'");
+    expect(normalizeSource).toContain(
+      "'independent house': 'independent_house'"
+    );
+
+    const villaQuestion = run({
+      property_type: 'villa',
+      listing_intent: 'unknown',
+    })[0].json.outbound_message;
+    expect(villaQuestion.content_text).toContain(
+      'villa. Are you looking to buy or rent?'
+    );
+  });
+
   it('asks for missing search details before querying property inventory', () => {
     const source = code('Lead Qualification Agent - Score & Classify');
     const run = new Function('$input', source);
@@ -160,11 +299,15 @@ describe('production n8n workflow', () => {
                   locality: 'Kondapur',
                   price: 8000000,
                   property_type: 'apartment',
-                  bedrooms: 2,
+                  bedrooms: 3,
                   listing_type: 'sale',
                 },
                 match_score: 90,
                 matching_reasons: ['matches apartment'],
+                alternative_reasons: [
+                  'closest available configuration is 3 BHK instead of 2 BHK',
+                ],
+                is_exact_match: false,
               },
             ],
             image: {
@@ -178,14 +321,36 @@ describe('production n8n workflow', () => {
       () => ({
         first: () => ({
           json: {
-            qualification: { requirements: { currency: 'INR' } },
+            event: { message_text: 'I need 2 bhk flat' },
+            config: { defaultFollowupHours: 24, hotFollowupHours: 2 },
+            context: {
+              contact: {},
+              conversation: { automation_mode: 'agent' },
+            },
+            orchestrator: { intent: 'property_search', confidence: 1 },
+            is_opt_out_request: false,
+            qualification: {
+              requirements: {
+                currency: 'INR',
+                bedrooms: 2,
+                property_type: 'apartment',
+                listing_intent: 'buy',
+              },
+              lead_category: 'warm',
+              can_match_properties: true,
+              missing_fields: [],
+            },
             agent_activities: [],
           },
         }),
       })
     ) as Array<{
       json: {
-        property_matches: Array<{ id: string; title: string }>;
+        property_matches: Array<{
+          id: string;
+          title: string;
+          is_exact_match: boolean;
+        }>;
         drive_image: { file_id: string };
       };
     }>;
@@ -193,6 +358,7 @@ describe('production n8n workflow', () => {
     expect(merged[0].json.property_matches[0]).toMatchObject({
       id: 'property-1',
       title: 'Kondapur Apartment',
+      is_exact_match: false,
     });
     expect(merged[0].json.drive_image.file_id).toBe('drive-file-1');
 
@@ -206,6 +372,25 @@ describe('production n8n workflow', () => {
       'google_drive_file_id: input.outbound_message.google_drive_file_id'
     );
     expect(JSON.stringify(workflow)).toContain('google_drive_file_id');
+
+    const reply = new Function('$input', replySource)({
+      first: () => ({ json: merged[0].json }),
+    }) as Array<{
+      json: {
+        outbound_message: {
+          message_type: string;
+          content_text: string;
+          google_drive_file_id: string;
+        };
+      };
+    }>;
+    expect(reply[0].json.outbound_message).toMatchObject({
+      message_type: 'image',
+      google_drive_file_id: 'drive-file-1',
+    });
+    expect(reply[0].json.outbound_message.content_text).toContain(
+      'I do not have an exact 2 BHK match available right now'
+    );
   });
 
   it('persists and follows up site-visit requests with customer timing', () => {

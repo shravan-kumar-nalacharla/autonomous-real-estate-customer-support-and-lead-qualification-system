@@ -6,6 +6,8 @@ export interface PropertyMatch {
   property?: PublicPropertyDetails;
   match_score: number;
   matching_reasons: string[];
+  alternative_reasons: string[];
+  is_exact_match: boolean;
 }
 
 export interface PublicPropertyDetails {
@@ -83,6 +85,9 @@ export async function findPropertyMatches(args: {
   }
 
   return (data as PropertyRow[])
+    .filter((property) =>
+      hasCompatibleListingIntent(property, args.requirements)
+    )
     .map((property) => scoreProperty(property, args.requirements))
     .filter((match) => match.match_score > 0)
     .sort((a, b) => b.match_score - a.match_score)
@@ -95,6 +100,7 @@ function scoreProperty(
 ): PropertyMatch {
   let score = 0;
   const reasons: string[] = [];
+  const alternatives: string[] = [];
 
   if (
     requirements.listing_type &&
@@ -102,6 +108,10 @@ function scoreProperty(
   ) {
     score += 15;
     reasons.push(`matches ${requirements.listing_type} intent`);
+  } else if (requirements.listing_type) {
+    alternatives.push(
+      `listed for ${property.listing_type}, not ${requirements.listing_type}`
+    );
   }
   const intent = normalizeIntent(requirements.listing_intent);
   const propertyIntent = normalizeIntent(
@@ -110,6 +120,8 @@ function scoreProperty(
   if (intent && propertyIntent === intent) {
     score += 12;
     reasons.push(`matches ${intent} intent`);
+  } else if (intent && propertyIntent) {
+    alternatives.push(`available for ${propertyIntent}, not ${intent}`);
   }
 
   if (
@@ -133,6 +145,10 @@ function scoreProperty(
     reasons.push(
       `matches requested property type ${requirements.property_type}`
     );
+  } else if (requirements.property_type) {
+    alternatives.push(
+      `is a ${property.property_type}, not ${requirements.property_type}`
+    );
   }
 
   if (requirements.preferred_locations?.length) {
@@ -144,6 +160,10 @@ function scoreProperty(
     if (locationHit) {
       score += 25;
       reasons.push(`is in ${locationHit}`);
+    } else {
+      alternatives.push(
+        `is in ${property.locality ?? property.location}, outside the requested location`
+      );
     }
   }
 
@@ -151,6 +171,12 @@ function scoreProperty(
   if (bedrooms && property.bedrooms === bedrooms) {
     score += 15;
     reasons.push(`has ${bedrooms} bedrooms`);
+  } else if (bedrooms && property.bedrooms) {
+    const difference = Math.abs(property.bedrooms - bedrooms);
+    score += Math.max(1, 12 - difference * 4);
+    alternatives.push(
+      `closest available configuration is ${property.bedrooms} BHK instead of ${bedrooms} BHK`
+    );
   }
 
   const min = requirements.budget_min;
@@ -163,6 +189,10 @@ function scoreProperty(
       score += 25;
       reasons.push('is within the stated budget range');
     }
+  } else if (max != null && property.price > max) {
+    alternatives.push('is above the stated budget');
+  } else if (min != null && property.price < min) {
+    alternatives.push('is below the stated budget range');
   }
 
   if (
@@ -204,6 +234,8 @@ function scoreProperty(
     property: toPublicProperty(property),
     match_score: Math.min(100, score),
     matching_reasons: reasons,
+    alternative_reasons: alternatives,
+    is_exact_match: alternatives.length === 0,
   };
 }
 
@@ -216,6 +248,20 @@ function normalizeIntent(value?: string | null) {
   if (value === 'sale') return 'buy';
   if (value === 'rent') return 'rent';
   return value;
+}
+
+function hasCompatibleListingIntent(
+  property: PropertyRow,
+  requirements: ParsedLeadRequirements
+) {
+  const requested = normalizeIntent(
+    requirements.listing_intent ?? requirements.listing_type
+  );
+  if (!requested || requested === 'sell') return true;
+  return (
+    normalizeIntent(property.listing_intent ?? property.listing_type) ===
+    requested
+  );
 }
 
 function fuzzyIncludes(haystack: string, needle: string) {
