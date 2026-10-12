@@ -190,10 +190,31 @@ export default function AppointmentsPage() {
       toast.error('Choose a time first');
       return;
     }
-    await patchAppointment(appointment.id, {
-      status: 'proposed',
-      proposed_start_at: new Date(proposed).toISOString(),
-    });
+    const start = new Date(proposed).toISOString();
+    const end = new Date(new Date(start).getTime() + 45 * 60_000).toISOString();
+    setUpdatingId(appointment.id);
+    try {
+      const response = await fetch('/api/appointments/reschedule', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          appointment_id: appointment.id,
+          slot_start_at: start,
+          slot_end_at: end,
+        }),
+      });
+      const json = await response.json();
+      if (!response.ok)
+        throw new Error(json.error ?? 'Failed to propose appointment');
+      await loadAppointments();
+      toast.success('Appointment time proposed');
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to propose appointment'
+      );
+    } finally {
+      setUpdatingId(null);
+    }
   }
 
   async function confirmAppointment(

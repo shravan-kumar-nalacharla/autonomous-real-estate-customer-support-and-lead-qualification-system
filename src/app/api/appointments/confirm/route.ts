@@ -3,6 +3,7 @@ import { requireOrganizationContext } from '@/lib/organizations';
 import { assertSlotAvailable } from '@/lib/real-estate/slots';
 import { isUuid } from '@/lib/internal-secret';
 import { engineSendText } from '@/lib/automations/meta-send';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 
 export async function POST(request: Request) {
   const guard = await requireOrganizationContext([
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
     'agent',
   ]);
   if (!guard.ok) return guard.response;
+  const db = supabaseAdmin();
 
   const body = (await request.json().catch(() => null)) as {
     appointment_id?: string;
@@ -30,7 +32,7 @@ export async function POST(request: Request) {
   let agentId = body?.agent_id ?? null;
 
   if (body?.slot_lock_id) {
-    const { data: lock } = await guard.supabase
+    const { data: lock } = await db
       .from('appointment_slot_locks')
       .select('*')
       .eq('id', body.slot_lock_id)
@@ -57,15 +59,28 @@ export async function POST(request: Request) {
     );
   }
 
-  const available = await assertSlotAvailable({
-    db: guard.supabase,
-    organizationId: guard.organizationId,
-    slotStartAt,
-    slotEndAt,
-    agentId,
-    excludeAppointmentId: body?.appointment_id,
-    excludeLockId: body?.slot_lock_id,
-  });
+  let available: boolean;
+  try {
+    available = await assertSlotAvailable({
+      db,
+      organizationId: guard.organizationId,
+      slotStartAt,
+      slotEndAt,
+      agentId,
+      excludeAppointmentId: body?.appointment_id,
+      excludeLockId: body?.slot_lock_id,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to check slot availability',
+      },
+      { status: 500 }
+    );
+  }
   if (!available && !body?.slot_lock_id) {
     return NextResponse.json(
       { error: 'Slot is no longer available' },
@@ -83,12 +98,12 @@ export async function POST(request: Request) {
     updated_at: new Date().toISOString(),
   };
   const query = body?.appointment_id
-    ? guard.supabase
+    ? db
         .from('appointments')
         .update(payload)
         .eq('id', body.appointment_id)
         .eq('organization_id', guard.organizationId)
-    : guard.supabase.from('appointments').insert(payload);
+    : db.from('appointments').insert(payload);
 
   const { data, error } = await query
     .select(
@@ -99,14 +114,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (body?.slot_lock_id) {
-    await guard.supabase
+    await db
       .from('appointment_slot_locks')
       .update({ status: 'confirmed', appointment_id: data.id })
       .eq('id', body.slot_lock_id)
       .eq('organization_id', guard.organizationId);
   }
 
-  await guard.supabase
+  await db
     .from('conversations')
     .update({
       pipeline_stage: 'site_visit_confirmed',
@@ -122,13 +137,13 @@ export async function POST(request: Request) {
 
   if (data.conversation_id && contact?.user_id) {
     const [{ data: requirements }, { data: organization }] = await Promise.all([
-      guard.supabase
+      db
         .from('lead_requirements')
         .select('property_type, preferred_locations')
         .eq('organization_id', guard.organizationId)
         .eq('contact_id', contactId)
         .maybeSingle(),
-      guard.supabase
+      db
         .from('organizations')
         .select('name, timezone')
         .eq('id', guard.organizationId)

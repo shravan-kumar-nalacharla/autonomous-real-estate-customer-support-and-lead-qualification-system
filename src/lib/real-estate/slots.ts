@@ -177,7 +177,7 @@ export async function assertSlotAvailable(args: {
 
   let locksQuery = args.db
     .from('appointment_slot_locks')
-    .select('id, agent_id, slot_start_at, slot_end_at')
+    .select('id, appointment_id, agent_id, slot_start_at, slot_end_at')
     .eq('organization_id', args.organizationId)
     .in('status', ['held', 'confirmed'])
     .gt('expires_at', new Date().toISOString());
@@ -196,8 +196,11 @@ export async function assertSlotAvailable(args: {
       .gt('ends_at', start.toISOString()),
   ]);
 
-  if (appointmentsResult.error || locksResult.error || timeOffResult.error)
-    return false;
+  const queryError =
+    appointmentsResult.error ?? locksResult.error ?? timeOffResult.error;
+  if (queryError) {
+    throw new Error(`Failed to check slot availability: ${queryError.message}`);
+  }
   const busyRanges: TimeRange[] = [
     ...(
       (appointmentsResult.data ?? []) as Array<Record<string, unknown>>
@@ -216,13 +219,13 @@ export async function assertSlotAvailable(args: {
           ]
         : [];
     }),
-    ...((locksResult.data ?? []) as Array<Record<string, unknown>>).map(
-      (row) => ({
+    ...((locksResult.data ?? []) as Array<Record<string, unknown>>)
+      .filter((row) => row.appointment_id !== args.excludeAppointmentId)
+      .map((row) => ({
         start: new Date(String(row.slot_start_at)),
         end: new Date(String(row.slot_end_at)),
         agentId: (row.agent_id as string | null) ?? null,
-      })
-    ),
+      })),
     ...((timeOffResult.data ?? []) as Array<Record<string, unknown>>).map(
       (row) => ({
         start: new Date(String(row.starts_at)),
