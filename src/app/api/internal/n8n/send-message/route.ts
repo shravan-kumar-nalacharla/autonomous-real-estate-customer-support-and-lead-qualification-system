@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { downloadGoogleDriveImage } from '@/lib/google-drive-images';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { decrypt } from '@/lib/whatsapp/encryption';
+import { normalizeWhatsAppImage } from '@/lib/whatsapp/normalize-image';
 import {
   sendInteractiveButtons,
   sendImageMessage,
@@ -98,20 +99,27 @@ async function resolveImageMediaId(args: {
   const fromBody = args.whatsappMediaId?.trim();
   if (fromBody) return fromBody;
 
+  const uploadImage = async (image: {
+    buffer: Buffer;
+    filename: string;
+    mimeType: string;
+  }) => {
+    const normalized = await normalizeWhatsAppImage(image);
+    const { mediaId } = await uploadMediaFromBuffer({
+      phoneNumberId: args.phoneNumberId,
+      accessToken: args.accessToken,
+      ...normalized,
+    });
+    return mediaId;
+  };
+
   const googleDriveFileId = args.googleDriveFileId?.trim();
   if (googleDriveFileId) {
     const image = await downloadGoogleDriveImage({
       fileId: googleDriveFileId,
       resourceKey: args.googleDriveResourceKey,
     });
-    const { mediaId } = await uploadMediaFromBuffer({
-      phoneNumberId: args.phoneNumberId,
-      accessToken: args.accessToken,
-      buffer: image.buffer,
-      filename: image.filename,
-      mimeType: image.mimeType,
-    });
-    return mediaId;
+    return uploadImage(image);
   }
 
   const imageUrl = args.imageUrl?.trim();
@@ -149,15 +157,11 @@ async function resolveImageMediaId(args: {
     throw new Error('image_url returned an empty file');
   }
 
-  const { mediaId } = await uploadMediaFromBuffer({
-    phoneNumberId: args.phoneNumberId,
-    accessToken: args.accessToken,
+  return uploadImage({
     buffer,
     filename: normalizeFilenameFromUrl(parsedUrl.toString()),
     mimeType,
   });
-
-  return mediaId;
 }
 
 export async function POST(request: Request) {
