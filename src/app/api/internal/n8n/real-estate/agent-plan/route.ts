@@ -373,14 +373,25 @@ export function normalizeAgentPlanBody(
   now = Date.now()
 ): AgentPlanBody {
   const leadUpdate = body.lead_update;
+  const requirements = body.requirements ?? leadUpdate?.requirements;
   const preferredAt = normalizeTimestamp(
     body.appointment_request?.preferred_at
   );
+  const requestedStartAt =
+    normalizeTimestamp(body.appointment_request?.requested_start_at) ??
+    preferredAt;
+  const completeAppointmentRequest =
+    body.appointment_request &&
+    requestedStartAt &&
+    hasAppointmentPropertyType(requirements?.property_type) &&
+    Boolean(
+      requirements?.preferred_locations?.some((location) => location.trim())
+    );
   const dueInHours = clampNumber(body.follow_up_task?.due_in_hours, 1, 168, 24);
 
   return {
     ...body,
-    requirements: body.requirements ?? leadUpdate?.requirements,
+    requirements,
     lead_score:
       body.lead_score ??
       (leadUpdate
@@ -391,11 +402,10 @@ export function normalizeAgentPlanBody(
             explanation: leadUpdate.summary,
           }
         : undefined),
-    appointment_request: body.appointment_request
+    appointment_request: completeAppointmentRequest
       ? {
           ...body.appointment_request,
-          requested_start_at:
-            body.appointment_request.requested_start_at ?? preferredAt,
+          requested_start_at: requestedStartAt,
         }
       : undefined,
     follow_up_task: body.follow_up_task
@@ -409,6 +419,12 @@ export function normalizeAgentPlanBody(
     human_handoff: body.human_handoff ?? body.handoff,
     activity_logs: body.activity_logs ?? body.agent_activity_logs,
   };
+}
+
+function hasAppointmentPropertyType(value?: string | null) {
+  return Boolean(
+    value && value.trim() && value.trim().toLowerCase() !== 'unknown'
+  );
 }
 
 function normalizeTimestamp(value?: string | null) {

@@ -235,7 +235,15 @@ export default function AppointmentsPage() {
       if (!response.ok)
         throw new Error(json.error ?? 'Failed to confirm appointment');
       await loadAppointments();
-      toast.success('Appointment confirmed');
+      if (json.notification_sent) {
+        toast.success(
+          'Appointment confirmed and customer notified on WhatsApp'
+        );
+      } else {
+        toast.warning(
+          `Appointment confirmed, but WhatsApp notification failed: ${json.notification_error ?? 'unknown error'}`
+        );
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : 'Failed to confirm appointment'

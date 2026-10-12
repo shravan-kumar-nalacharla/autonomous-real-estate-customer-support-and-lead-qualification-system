@@ -134,6 +134,59 @@ describe('production n8n workflow', () => {
     );
   });
 
+  it('does not mistake the Book Site Visit button title for a date or time', () => {
+    const source = code('Parse & Validate Orchestrator Output');
+    const run = new Function('$input', '$', source);
+    const base = {
+      event: {
+        message_text: 'Book Site Visit',
+        interactive_reply_id: 'book_site_visit',
+      },
+      config: {},
+      context: { lead_requirements: {} },
+      is_opt_out_request: false,
+    };
+    const result = run(
+      {
+        first: () => ({
+          json: {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    intent: 'appointment_request',
+                    confidence: 1,
+                    extracted: {
+                      site_visit_interest: 'yes',
+                      preferred_appointment_time: 'Book Site Visit',
+                    },
+                  }),
+                },
+              },
+            ],
+          },
+        }),
+      },
+      () => ({ first: () => ({ json: base }) })
+    ) as Array<{
+      json: {
+        orchestrator: {
+          requirements: {
+            preferred_appointment_date: string;
+            preferred_appointment_time: string;
+            preferred_appointment_at: string;
+          };
+        };
+      };
+    }>;
+
+    expect(result[0].json.orchestrator.requirements).toMatchObject({
+      preferred_appointment_date: '',
+      preferred_appointment_time: '',
+      preferred_appointment_at: '',
+    });
+  });
+
   it('uses interactive buttons to qualify partial BHK and villa searches', () => {
     const source = code('Appointment, Follow-up & Escalation Agents');
     const run = (requirements: Record<string, unknown>) =>
@@ -462,13 +515,93 @@ describe('production n8n workflow', () => {
     );
   });
 
-  it('persists and follows up site-visit requests with customer timing', () => {
+  it('creates site-visit requests only after time, property type, and location are known', () => {
     const source = code('Appointment, Follow-up & Escalation Agents');
     expect(source).toContain("reason: 'Confirm site visit request'");
     expect(source).toContain(
       'preferred_at: q.requirements.preferred_appointment_at'
     );
-    expect(source).toContain('Preferred time: ${preferredVisitDetails}');
-    expect(source).toContain('pending confirmation in Appointments');
+    expect(source).toContain('if (appointmentReady)');
+    expect(source).toContain("missingVisitFields.push('property type')");
+    expect(source).toContain("missingVisitFields.push('location')");
+    expect(source).toContain("missingVisitFields.push('date and time')");
+    expect(source).toContain('after an admin confirms the slot');
+  });
+
+  it('asks for missing visit details before emitting an appointment request', () => {
+    const source = code('Appointment, Follow-up & Escalation Agents');
+    const run = new Function('$input', source);
+    const makeInput = (requirements: Record<string, unknown>) => ({
+      first: () => ({
+        json: {
+          event: {
+            message_text: 'Book a site visit',
+            interactive_reply_id: '',
+          },
+          config: { hotFollowupHours: 2, defaultFollowupHours: 24 },
+          context: { contact: {}, conversation: { automation_mode: 'agent' } },
+          orchestrator: {
+            intent: 'appointment_request',
+            confidence: 0.9,
+            requires_human: false,
+          },
+          qualification: {
+            requirements,
+            lead_category: 'warm',
+            can_match_properties: false,
+            missing_fields: [],
+          },
+          property_matches: [],
+          agent_activities: [],
+          is_opt_out_request: false,
+        },
+      }),
+    });
+
+    const incomplete = run(
+      makeInput({
+        site_visit_interest: 'yes',
+        property_type: 'unknown',
+        preferred_locations: [],
+        preferred_appointment_at: '',
+      })
+    ) as Array<{
+      json: {
+        appointment_request: unknown;
+        outbound_message: { message_type: string; content_text: string };
+      };
+    }>;
+    expect(incomplete[0].json.appointment_request).toBeNull();
+    expect(incomplete[0].json.outbound_message.message_type).toBe(
+      'interactive'
+    );
+    expect(incomplete[0].json.outbound_message.content_text).toContain(
+      'property type, location and date and time'
+    );
+
+    const complete = run(
+      makeInput({
+        site_visit_interest: 'yes',
+        property_type: 'villa',
+        preferred_locations: ['Gachibowli'],
+        preferred_appointment_date: '2026-10-13',
+        preferred_appointment_time: '10:00 AM',
+        preferred_appointment_at: '2026-10-13T10:00:00+05:30',
+      })
+    ) as Array<{
+      json: {
+        appointment_request: { preferred_at: string; notes: string };
+        outbound_message: { content_text: string };
+      };
+    }>;
+    expect(complete[0].json.appointment_request).toMatchObject({
+      preferred_at: '2026-10-13T10:00:00+05:30',
+    });
+    expect(complete[0].json.appointment_request.notes).toContain(
+      'villa in Gachibowli'
+    );
+    expect(complete[0].json.outbound_message.content_text).toContain(
+      'after an admin confirms the slot'
+    );
   });
 });

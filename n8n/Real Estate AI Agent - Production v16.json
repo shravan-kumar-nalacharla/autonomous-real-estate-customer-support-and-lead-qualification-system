@@ -12,10 +12,7 @@
       "name": "SETUP — READ BEFORE ACTIVATING",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        11040,
-        20880
-      ]
+      "position": [11040, 20880]
     },
     {
       "parameters": {
@@ -28,10 +25,7 @@
       "name": "SECURITY & TENANCY CONTRACT",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        11792,
-        20880
-      ]
+      "position": [11792, 20880]
     },
     {
       "parameters": {
@@ -44,10 +38,7 @@
       "name": "REQUIRED RENDER ENVIRONMENT VARIABLES",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        12496,
-        20880
-      ]
+      "position": [12496, 20880]
     },
     {
       "parameters": {
@@ -59,10 +50,7 @@
       "name": "Webhook - Real Estate AI Agent Real Estate Inbound",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        9040,
-        21552
-      ],
+      "position": [9040, 21552],
       "webhookId": "59ba71e1-e1fc-40d3-b8b8-dcdc838d13c5"
     },
     {
@@ -73,10 +61,7 @@
       "name": "Normalize + Authenticate Real Estate AI Agent Event",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        9312,
-        21552
-      ]
+      "position": [9312, 21552]
     },
     {
       "parameters": {
@@ -86,10 +71,7 @@
       "name": "CONFIG - Read Render Environment",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        9568,
-        21552
-      ]
+      "position": [9568, 21552]
     },
     {
       "parameters": {
@@ -122,10 +104,7 @@
       "name": "Real Estate AI Agent - Get Secure CRM Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        9824,
-        21552
-      ],
+      "position": [9824, 21552],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000
@@ -138,10 +117,7 @@
       "name": "Merge Secure CRM Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        10096,
-        21552
-      ]
+      "position": [10096, 21552]
     },
     {
       "parameters": {
@@ -151,10 +127,7 @@
       "name": "Preflight - Idempotency & Automation Guard",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        10352,
-        21552
-      ]
+      "position": [10352, 21552]
     },
     {
       "parameters": {
@@ -171,10 +144,7 @@
       "name": "IF - Skip Duplicate or Paused Conversation?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [
-        10640,
-        21248
-      ]
+      "position": [10640, 21248]
     },
     {
       "parameters": {
@@ -207,26 +177,20 @@
       "name": "AI - Conversation Orchestrator",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        10880,
-        21696
-      ],
+      "position": [10880, 21696],
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 1500
     },
     {
       "parameters": {
-        "jsCode": "const base=$('Preflight - Idempotency & Automation Guard').first().json;\nconst raw=$input.first().json||{}; const content=raw?.choices?.[0]?.message?.content||raw?.body?.choices?.[0]?.message?.content||'{}';\nlet parsed={}; try{parsed=typeof content==='string'?JSON.parse(content):content;}catch{parsed={intent:'unknown',confidence:0,extracted:{},requires_human:true,risk_flags:['orchestrator_parse_failed'],customer_reply_hint:''};}\nconst allowed=new Set(['property_search','requirements_update','property_question','appointment_request','appointment_change','appointment_cancel','sell_property','rent_property','valuation_request','market_question','human_support','complaint_or_sensitive','general_enquiry','unknown']);\nconst action=String(base.event.interactive_reply_id||'').toLowerCase(); const actionIntent={show_menu:'general_enquiry',find_property:'property_search',book_site_visit:'appointment_request',talk_to_agent:'human_support',buy:'property_search',rent:'rent_property',sell_lease:'sell_property',sell_property:'sell_property',buy_plot:'property_search',apartment:'property_search',villa:'property_search',independent_house:'property_search'}[action];\nconst intent=actionIntent||(allowed.has(parsed.intent)?parsed.intent:'unknown'); const confidence=actionIntent?1:Math.max(0,Math.min(1,Number(parsed.confidence||0))); const extracted=(parsed.extracted&&typeof parsed.extracted==='object')?parsed.extracted:{}; const actionDefaults=action==='buy'?{customer_role:'buyer',listing_intent:'buy'}:action==='rent'?{customer_role:'renter',listing_intent:'rent'}:action==='sell_lease'?{customer_role:'seller',listing_intent:'sell'}:action==='apartment'?{property_type:'apartment',property_category:'residential'}:action==='villa'?{property_type:'villa',property_category:'residential'}:action==='independent_house'?{property_type:'independent_house',property_category:'residential'}:{}; const s={...extracted,...actionDefaults}; const e=base.context.lead_requirements||{}; const messageText=String(base.event.message_text||'').toLowerCase(); const bhk=messageText.match(/\\b([1-9]|10)\\s*(?:bhk|bed(?:room)?s?)\\b/i); const detectedType=/\\b(flat|apartment)\\b/.test(messageText)?'apartment':/\\bvilla\\b/.test(messageText)?'villa':/\\b(independent house|house)\\b/.test(messageText)?'independent_house':/\\b(plot|land)\\b/.test(messageText)?'plot':null; const existingIntent=String(e.listing_intent||'').toLowerCase(); const existingType=String(e.property_type||'').toLowerCase(); const explicitIntent=/\\b(buy|purchase|for sale|rent|rental|lease|sell)\\b/.test(messageText); if(!s.bedrooms&&bhk)s.bedrooms=Number(bhk[1]); if((!s.property_type||s.property_type==='unknown')&&detectedType)s.property_type=detectedType; if(!detectedType&&bhk&&!existingType)s.property_type='unknown'; if((!s.property_category||s.property_category==='unknown')&&(detectedType==='apartment'||detectedType==='villa'||detectedType==='independent_house'||bhk))s.property_category='residential'; if(!['buy','rent','sell_lease'].includes(action)&&!explicitIntent&&!['buy','rent','sell','lease'].includes(existingIntent)&&(bhk||detectedType))s.listing_intent='unknown';\nfunction clean(v,m=180){return String(v??'').trim().slice(0,m);} function en(v,a,f='unknown'){v=clean(v,60).toLowerCase();return a.includes(v)?v:f;} function pi(v,max=100){const n=parseInt(v,10);return Number.isFinite(n)&&n>0?Math.min(n,max):null;} function pm(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/[^\\d.]/g,''));return Number.isFinite(n)&&n>=0?Math.round(n):null;} function pn(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/[^\\d.]/g,''));return Number.isFinite(n)&&n>0?n:null;} function arr(v,n=8,m=80){return Array.isArray(v)?v.map(x=>clean(x,m)).filter(Boolean).slice(0,n):[];} function keep(a,b,f=null){const usable=a!==null&&a!==undefined&&a!==''&&a!=='unknown';return usable?a:(b!==null&&b!==undefined&&b!==''?b:f);}\nconst loc=arr(s.preferred_locations,6,90), amenities=arr(s.amenities,10,60);\nconst requirements={customer_role:en(keep(s.customer_role,e.customer_role),['buyer','renter','seller','landlord','investor','broker','unknown']),listing_intent:en(keep(s.listing_intent,e.listing_intent),['buy','rent','sell','lease','unknown']),property_category:en(keep(s.property_category,e.property_category),['residential','commercial','land','unknown']),property_type:en(keep(s.property_type,e.property_type),['apartment','villa','independent_house','plot','agricultural_land','commercial_shop','office','warehouse','showroom','unknown']),property_stage:en(keep(s.property_stage,e.property_stage),['ready_to_move','under_construction','new_launch','resale','land_plot','unknown']),preferred_locations:loc.length?loc:(Array.isArray(e.preferred_locations)?e.preferred_locations:[]),budget_min:pm(s.budget_min)??e.budget_min??null,budget_max:pm(s.budget_max)??e.budget_max??null,currency:clean(s.currency||e.currency||'INR',8).toUpperCase(),bedrooms:pi(s.bedrooms,20)??e.bedrooms??null,bathrooms:pi(s.bathrooms,20)??e.bathrooms??null,area_min:pn(s.area_min)??e.area_min??null,area_max:pn(s.area_max)??e.area_max??null,area_unit:en(keep(s.area_unit,e.area_unit),['sqft','sqyd','acre','cent','gunta','sqm','unknown']),plot_facing:clean(s.plot_facing||e.plot_facing||'',80),road_width:clean(s.road_width||e.road_width||'',80),approval_authority:clean(s.approval_authority||e.approval_authority||'',80),rera_id:clean(s.rera_id||e.rera_id||'',80),possession_timeline:clean(s.possession_timeline||e.possession_timeline||'',120),buying_timeline:clean(s.buying_timeline||s.timeline||e.buying_timeline||e.timeline||'',120),financing_required:en(keep(s.financing_required,e.financing_required),['yes','no','unknown']),loan_preapproved:en(keep(s.loan_preapproved,e.loan_preapproved),['yes','no','unknown']),furnishing:en(keep(s.furnishing,e.furnishing),['furnished','semi_furnished','unfurnished','unknown']),parking_required:en(keep(s.parking_required,e.parking_required),['yes','no','unknown']),amenities:amenities.length?amenities:(Array.isArray(e.amenities)?e.amenities:[]),site_visit_interest:en(keep(s.site_visit_interest,e.site_visit_interest),['yes','no','unknown']),preferred_appointment_date:clean(s.preferred_appointment_date||'',80),preferred_appointment_time:clean(s.preferred_appointment_time||'',80),preferred_appointment_at:clean(s.preferred_appointment_at||'',120),property_reference:clean(s.property_reference||'',120),seller_property_details:clean(s.seller_property_details||e.seller_property_details||'',500)};\nreturn [{json:{event:base.event,config:base.config,context:base.context,is_opt_out_request:base.is_opt_out_request,orchestrator:{intent,confidence,response_language:clean(parsed.response_language||'en',12),requirements,requires_human:Boolean(parsed.requires_human),risk_flags:arr(parsed.risk_flags,12,80),customer_reply_hint:clean(parsed.customer_reply_hint,500)}}}];"
+        "jsCode": "const base=$('Preflight - Idempotency & Automation Guard').first().json;\nconst raw=$input.first().json||{}; const content=raw?.choices?.[0]?.message?.content||raw?.body?.choices?.[0]?.message?.content||'{}';\nlet parsed={}; try{parsed=typeof content==='string'?JSON.parse(content):content;}catch{parsed={intent:'unknown',confidence:0,extracted:{},requires_human:true,risk_flags:['orchestrator_parse_failed'],customer_reply_hint:''};}\nconst allowed=new Set(['property_search','requirements_update','property_question','appointment_request','appointment_change','appointment_cancel','sell_property','rent_property','valuation_request','market_question','human_support','complaint_or_sensitive','general_enquiry','unknown']);\nconst action=String(base.event.interactive_reply_id||'').toLowerCase(); const actionIntent={show_menu:'general_enquiry',find_property:'property_search',book_site_visit:'appointment_request',talk_to_agent:'human_support',buy:'property_search',rent:'rent_property',sell_lease:'sell_property',sell_property:'sell_property',buy_plot:'property_search',apartment:'property_search',villa:'property_search',independent_house:'property_search'}[action];\nconst intent=actionIntent||(allowed.has(parsed.intent)?parsed.intent:'unknown'); const confidence=actionIntent?1:Math.max(0,Math.min(1,Number(parsed.confidence||0))); const extracted=(parsed.extracted&&typeof parsed.extracted==='object')?parsed.extracted:{}; const actionDefaults=action==='buy'?{customer_role:'buyer',listing_intent:'buy'}:action==='rent'?{customer_role:'renter',listing_intent:'rent'}:action==='sell_lease'?{customer_role:'seller',listing_intent:'sell'}:action==='apartment'?{property_type:'apartment',property_category:'residential'}:action==='villa'?{property_type:'villa',property_category:'residential'}:action==='independent_house'?{property_type:'independent_house',property_category:'residential'}:{}; const s={...extracted,...actionDefaults}; const e=base.context.lead_requirements||{}; const messageText=String(base.event.message_text||'').toLowerCase(); const bhk=messageText.match(/\\b([1-9]|10)\\s*(?:bhk|bed(?:room)?s?)\\b/i); const detectedType=/\\b(flat|apartment)\\b/.test(messageText)?'apartment':/\\bvilla\\b/.test(messageText)?'villa':/\\b(independent house|house)\\b/.test(messageText)?'independent_house':/\\b(plot|land)\\b/.test(messageText)?'plot':null; const existingIntent=String(e.listing_intent||'').toLowerCase(); const existingType=String(e.property_type||'').toLowerCase(); const explicitIntent=/\\b(buy|purchase|for sale|rent|rental|lease|sell)\\b/.test(messageText); if(!s.bedrooms&&bhk)s.bedrooms=Number(bhk[1]); if((!s.property_type||s.property_type==='unknown')&&detectedType)s.property_type=detectedType; if(!detectedType&&bhk&&!existingType)s.property_type='unknown'; if((!s.property_category||s.property_category==='unknown')&&(detectedType==='apartment'||detectedType==='villa'||detectedType==='independent_house'||bhk))s.property_category='residential'; if(!['buy','rent','sell_lease'].includes(action)&&!explicitIntent&&!['buy','rent','sell','lease'].includes(existingIntent)&&(bhk||detectedType))s.listing_intent='unknown';\nfunction clean(v,m=180){return String(v??'').trim().slice(0,m);} function en(v,a,f='unknown'){v=clean(v,60).toLowerCase();return a.includes(v)?v:f;} function pi(v,max=100){const n=parseInt(v,10);return Number.isFinite(n)&&n>0?Math.min(n,max):null;} function pm(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/[^\\d.]/g,''));return Number.isFinite(n)&&n>=0?Math.round(n):null;} function pn(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/[^\\d.]/g,''));return Number.isFinite(n)&&n>0?n:null;} function arr(v,n=8,m=80){return Array.isArray(v)?v.map(x=>clean(x,m)).filter(Boolean).slice(0,n):[];} function keep(a,b,f=null){const usable=a!==null&&a!==undefined&&a!==''&&a!=='unknown';return usable?a:(b!==null&&b!==undefined&&b!==''?b:f);}\nconst loc=arr(s.preferred_locations,6,90), amenities=arr(s.amenities,10,60);\nconst requirements={customer_role:en(keep(s.customer_role,e.customer_role),['buyer','renter','seller','landlord','investor','broker','unknown']),listing_intent:en(keep(s.listing_intent,e.listing_intent),['buy','rent','sell','lease','unknown']),property_category:en(keep(s.property_category,e.property_category),['residential','commercial','land','unknown']),property_type:en(keep(s.property_type,e.property_type),['apartment','villa','independent_house','plot','agricultural_land','commercial_shop','office','warehouse','showroom','unknown']),property_stage:en(keep(s.property_stage,e.property_stage),['ready_to_move','under_construction','new_launch','resale','land_plot','unknown']),preferred_locations:loc.length?loc:(Array.isArray(e.preferred_locations)?e.preferred_locations:[]),budget_min:pm(s.budget_min)??e.budget_min??null,budget_max:pm(s.budget_max)??e.budget_max??null,currency:clean(s.currency||e.currency||'INR',8).toUpperCase(),bedrooms:pi(s.bedrooms,20)??e.bedrooms??null,bathrooms:pi(s.bathrooms,20)??e.bathrooms??null,area_min:pn(s.area_min)??e.area_min??null,area_max:pn(s.area_max)??e.area_max??null,area_unit:en(keep(s.area_unit,e.area_unit),['sqft','sqyd','acre','cent','gunta','sqm','unknown']),plot_facing:clean(s.plot_facing||e.plot_facing||'',80),road_width:clean(s.road_width||e.road_width||'',80),approval_authority:clean(s.approval_authority||e.approval_authority||'',80),rera_id:clean(s.rera_id||e.rera_id||'',80),possession_timeline:clean(s.possession_timeline||e.possession_timeline||'',120),buying_timeline:clean(s.buying_timeline||s.timeline||e.buying_timeline||e.timeline||'',120),financing_required:en(keep(s.financing_required,e.financing_required),['yes','no','unknown']),loan_preapproved:en(keep(s.loan_preapproved,e.loan_preapproved),['yes','no','unknown']),furnishing:en(keep(s.furnishing,e.furnishing),['furnished','semi_furnished','unfurnished','unknown']),parking_required:en(keep(s.parking_required,e.parking_required),['yes','no','unknown']),amenities:amenities.length?amenities:(Array.isArray(e.amenities)?e.amenities:[]),site_visit_interest:en(keep(s.site_visit_interest,e.site_visit_interest),['yes','no','unknown']),preferred_appointment_date:clean(s.preferred_appointment_date||e.preferred_appointment_date||'',80),preferred_appointment_time:clean(s.preferred_appointment_time||e.preferred_appointment_time||'',80),preferred_appointment_at:clean(s.preferred_appointment_at||e.preferred_appointment_at||'',120),property_reference:clean(s.property_reference||e.property_reference||'',120),seller_property_details:clean(s.seller_property_details||e.seller_property_details||'',500)};\nif(action==='book_site_visit'){requirements.site_visit_interest='yes';requirements.preferred_appointment_date=clean(e.preferred_appointment_date||'',80);requirements.preferred_appointment_time=clean(e.preferred_appointment_time||'',80);requirements.preferred_appointment_at=clean(e.preferred_appointment_at||'',120);}\nreturn [{json:{event:base.event,config:base.config,context:base.context,is_opt_out_request:base.is_opt_out_request,orchestrator:{intent,confidence,response_language:clean(parsed.response_language||'en',12),requirements,requires_human:Boolean(parsed.requires_human),risk_flags:arr(parsed.risk_flags,12,80),customer_reply_hint:clean(parsed.customer_reply_hint,500)}}}];"
       },
       "id": "2e1381e3-5ac3-4c06-b558-1f35319d17c8",
       "name": "Parse & Validate Orchestrator Output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        11136,
-        21696
-      ]
+      "position": [11136, 21696]
     },
     {
       "parameters": {
@@ -236,10 +200,7 @@
       "name": "Lead Qualification Agent - Score & Classify",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        11392,
-        21696
-      ]
+      "position": [11392, 21696]
     },
     {
       "parameters": {
@@ -256,10 +217,7 @@
       "name": "IF - Property Matching Needed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [
-        11664,
-        21696
-      ]
+      "position": [11664, 21696]
     },
     {
       "parameters": {
@@ -292,10 +250,7 @@
       "name": "Property Matching Agent - Find Available Listings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        11920,
-        21600
-      ],
+      "position": [11920, 21600],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000
@@ -308,23 +263,17 @@
       "name": "Merge Property Matching Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        12176,
-        21600
-      ]
+      "position": [12176, 21600]
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\nconst text = String(input.event.message_text || '').trim();\nconst lower = text.toLowerCase();\nconst intent = input.orchestrator.intent;\nconst q = input.qualification;\nconst context = input.context || {};\nconst orgName = 'EastWest Real Estates';\nconst automationMode = String(context.conversation?.automation_mode || '').trim().toLowerCase();\nconst humanOwnedModes = new Set(['human', 'manual', 'paused', 'off', 'disabled']);\nconst humanHandoffBlocksAutomation = context.conversation?.handoff_active === true && (humanOwnedModes.has(automationMode) || !automationMode);\nconst agentModeActive = automationMode === 'agent';\nconst actionId = String(input.event.interactive_reply_id || '').toLowerCase();\nconst menuWasRecentlySent = context.last_agent_menu_sent_recently === true;\n\nconst sensitiveKeywords = /\\b(legal|lawyer|loan|finance|mortgage|negotia|complaint|fraud|urgent|refund|abuse)\\b/i.test(lower);\nconst explicitHuman = intent === 'human_support' || /\\b(human|agent|person|executive|broker|call me)\\b/i.test(lower);\nconst appointmentIntent = ['appointment_request', 'appointment_change'].includes(intent) || q.requirements.site_visit_interest === 'yes' || Boolean(q.requirements.preferred_appointment_at || q.requirements.preferred_appointment_date || q.requirements.preferred_appointment_time);\n\n// Agent mode means the AI agent is allowed to continue responding.\n// Do NOT create/refresh human handoff just because confidence is low, a lead is hot,\n// or the customer asks for a site visit. Those should become CRM tasks/appointment requests\n// while the agent still sends a useful reply. Only truly human/sensitive cases create handoff.\nconst forcedHumanReason =\n  intent === 'complaint_or_sensitive' ? 'Sensitive or complaint enquiry' :\n  explicitHuman ? 'Customer requested a human agent' :\n  sensitiveKeywords ? 'Sensitive domain request' :\n  null;\nconst needsHuman = Boolean(forcedHumanReason);\nconst notifyHumanWithoutBlocking = Boolean(\n  appointmentIntent ||\n  q.lead_category === 'hot' ||\n  input.orchestrator.confidence < 0.45 ||\n  input.orchestrator.requires_human\n);\n\nconst handoffReason = forcedHumanReason;\n\nconst preferredVisitDetails = [q.requirements.preferred_appointment_date, q.requirements.preferred_appointment_time].filter(Boolean).join(' ');\nlet appointmentRequest = null;\nif (appointmentIntent) {\n  appointmentRequest = {\n    action: 'create_or_update_request',\n    status: 'requested',\n    preferred_at: q.requirements.preferred_appointment_at || null,\n    property_reference: q.requirements.property_reference || null,\n    property_id: null,\n    notes: preferredVisitDetails ? `Customer requested a site visit. Preferred time: ${preferredVisitDetails}. Human confirmation is required.` : 'Customer requested a site visit or appointment. Human confirmation is required.',\n  };\n}\n\nlet followUpTask = null;\nif (!input.is_opt_out_request && !context.contact?.opted_out && !humanHandoffBlocksAutomation) {\n  if (appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Confirm site visit request',\n      due_in_hours: 2,\n      priority: 'high',\n    };\n  } else if (q.lead_category === 'hot' && !appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Hot lead without a confirmed site visit',\n      due_in_hours: input.config.hotFollowupHours,\n      priority: 'high',\n    };\n  } else if (q.missing_fields.length && ['property_search', 'requirements_update', 'general_enquiry'].includes(intent)) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Incomplete lead qualification',\n      due_in_hours: input.config.defaultFollowupHours,\n      priority: q.lead_category === 'warm' ? 'normal' : 'low',\n    };\n  } else if (input.property_matches.length && !appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Property recommendations sent without a site-visit request',\n      due_in_hours: input.config.defaultFollowupHours,\n      priority: q.lead_category === 'hot' ? 'high' : 'normal',\n    };\n  }\n}\n\nfunction formatPrice(match) {\n  if (match.price === null || match.price === undefined || match.price === '') return '';\n  const value = Number(match.price);\n  if (!Number.isFinite(value)) return '';\n  return `${match.currency || 'INR'} ${value.toLocaleString('en-IN')}`;\n}\n\nfunction propertyReply(matches) {\n  if (!matches.length) {\n    return `I could not find an exact currently available match yet. Which requirement can be flexible: locality, budget, or property type?`;\n  }\n  const lines = matches.map((m, index) => {\n    const parts = [m.title, m.locality || m.city, m.bedrooms ? `${m.bedrooms} BHK` : '', formatPrice(m)].filter(Boolean);\n    return `${index + 1}. ${parts.join(' — ')}`;\n  });\n  const requestedBedrooms = Number(q.requirements.bedrooms || 0);\n  const hasAlternative = matches.some((m) => m.is_exact_match === false || (requestedBedrooms && m.bedrooms && m.bedrooms !== requestedBedrooms));\n  const intro = hasAlternative\n    ? requestedBedrooms\n      ? `I do not have an exact ${requestedBedrooms} BHK match available right now, but here are the closest available alternatives:`\n      : 'I do not have an exact match available right now, but here are the closest available alternatives:'\n    : `I found ${matches.length} currently available option${matches.length > 1 ? 's' : ''} that may fit your requirement:`;\n  return `${intro}\\n${lines.join('\\n')}\\n\\nReply with a property number or ask to book a site visit.`;\n}\n\nconst menuPayload = {\n  type: 'button',\n  body: { text: `Welcome to ${orgName}. What would you like to do?` },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'find_property', title: 'Find Property' } },\n      { type: 'reply', reply: { id: 'book_site_visit', title: 'Book Site Visit' } },\n      { type: 'reply', reply: { id: 'talk_to_agent', title: 'Talk to Agent' } },\n    ],\n  },\n};\n\n// Interactive WhatsApp reply buttons. Requires Real Estate AI Agent backend send-message support for message_type='interactive'.\nconst menuText = `Welcome to ${orgName}. What would you like to do?`;\nconst intentMenuPayload = {\n  type: 'button',\n  body: { text: 'Great. Are you looking to buy, rent, sell, or lease?' },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'buy', title: 'Buy' } },\n      { type: 'reply', reply: { id: 'rent', title: 'Rent' } },\n      { type: 'reply', reply: { id: 'sell_lease', title: 'Sell/Lease' } },\n    ],\n  },\n};\nconst residentialTypePayload = {\n  type: 'button',\n  body: { text: 'Which kind of home do you prefer?' },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'apartment', title: 'Flat/Apartment' } },\n      { type: 'reply', reply: { id: 'villa', title: 'Villa' } },\n      { type: 'reply', reply: { id: 'independent_house', title: 'Independent House' } },\n    ],\n  },\n};\n\nlet messageType = 'text';\nlet rawWhatsappPayload = null;\nlet googleDriveFileId = null;\nlet googleDriveResourceKey = null;\nlet reply = '';\nlet shouldSend = !context.contact?.opted_out && !humanHandoffBlocksAutomation;\n\nif (input.is_opt_out_request) {\n  reply = 'You have been opted out of automated follow-ups. Reply START any time to resume messages.';\n  shouldSend = true;\n} else if (humanHandoffBlocksAutomation) {\n  shouldSend = false;\n} else if (actionId === 'show_menu') {\n  messageType = 'interactive';\n  rawWhatsappPayload = menuPayload;\n  reply = menuText;\n} else if (actionId === 'find_property') {\n  messageType = 'interactive';\n  rawWhatsappPayload = intentMenuPayload;\n  reply = intentMenuPayload.body.text;\n} else if (['property_search', 'requirements_update', 'property_question', 'rent_property'].includes(intent) && !['buy', 'rent', 'sell', 'lease'].includes(q.requirements.listing_intent)) {\n  reply = q.requirements.bedrooms\n    ? `Got it — ${q.requirements.bedrooms} BHK. Are you looking to buy or rent?`\n    : q.requirements.property_type && q.requirements.property_type !== 'unknown'\n      ? `Got it — ${String(q.requirements.property_type).replace(/_/g, ' ')}. Are you looking to buy or rent?`\n      : intentMenuPayload.body.text;\n  messageType = 'interactive';\n  rawWhatsappPayload = { ...intentMenuPayload, body: { text: reply } };\n  if (input.drive_image?.file_id) {\n    googleDriveFileId = input.drive_image.file_id;\n    googleDriveResourceKey = input.drive_image.resource_key || null;\n    rawWhatsappPayload.header = { type: 'image' };\n  }\n} else if (['buy', 'rent'].includes(q.requirements.listing_intent) && q.requirements.bedrooms && (!q.requirements.property_type || q.requirements.property_type === 'unknown')) {\n  reply = `${q.requirements.bedrooms} BHK — which kind of home do you prefer?`;\n  messageType = 'interactive';\n  rawWhatsappPayload = { ...residentialTypePayload, body: { text: reply } };\n  if (input.drive_image?.file_id) {\n    googleDriveFileId = input.drive_image.file_id;\n    googleDriveResourceKey = input.drive_image.resource_key || null;\n    rawWhatsappPayload.header = { type: 'image' };\n  }\n} else if (intent === 'general_enquiry' && !q.can_match_properties) {\n  if (menuWasRecentlySent) {\n    reply = 'Tell me whether you want to buy, rent, sell, or book a site visit. You can also share your preferred location and budget.';\n  } else {\n    messageType = 'interactive';\n    rawWhatsappPayload = menuPayload;\n    reply = menuText;\n  }\n} else if (appointmentIntent) {\n  reply = preferredVisitDetails || q.requirements.preferred_appointment_at\n    ? `I recorded your preferred site-visit time (${preferredVisitDetails || q.requirements.preferred_appointment_at}). It is pending confirmation and will appear in Appointments.`\n    : `I recorded your site-visit request. Please share your preferred date/time and property/location; it is pending confirmation in Appointments.`;\n} else if (intent === 'human_support' || intent === 'complaint_or_sensitive' || needsHuman) {\n  reply = `I have notified a ${orgName} team member so they can assist you.`;\n} else if (intent === 'unknown' || input.orchestrator.confidence < 0.45) {\n  if (menuWasRecentlySent) {\n    reply = 'Please choose an option above or describe the property, location, and budget you have in mind.';\n  } else {\n    messageType = 'interactive';\n    rawWhatsappPayload = menuPayload;\n    reply = menuText;\n  }\n} else if (input.property_matches.length || q.can_match_properties) {\n  reply = propertyReply(input.property_matches);\n  if (input.drive_image?.file_id) {\n    messageType = 'image';\n    googleDriveFileId = input.drive_image.file_id;\n    googleDriveResourceKey = input.drive_image.resource_key || null;\n    rawWhatsappPayload = { google_drive_file_id: googleDriveFileId, filename: input.drive_image.filename, image_kind: input.drive_image.kind };\n    if (input.drive_image.kind === 'representative') reply = `Representative image for this property type.\\n\\n${reply}`;\n  }\n} else if (q.missing_fields.length) {\n  reply = `To suggest suitable properties, please share your ${q.missing_fields.slice(0, 2).join(' and ')}.`;\n} else {\n  reply = input.orchestrator.customer_reply_hint || `Please tell me your preferred location, budget, property type, and buying or renting timeline.`;\n}\n\nconst activities = [...input.agent_activities];\nif (context.conversation?.handoff_active === true && agentModeActive) {\n  activities.push({\n    agent_type: 'preflight',\n    action_type: 'stale_handoff_ignored',\n    reason: 'Conversation automation_mode is agent, so n8n continues even though handoff_active is true.',\n    input_summary: `automation_mode=${automationMode}; handoff_active=true`,\n    output_summary: 'Agent automation allowed to respond.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (input.property_matches.length || q.can_match_properties) {\n  activities.push({\n    agent_type: 'property_matching',\n    action_type: input.property_matches.length ? 'recommendations_prepared' : 'no_exact_match',\n    reason: 'Property-match result evaluated',\n    input_summary: 'Qualification criteria passed to matching service.',\n    output_summary: input.property_matches.length ? `${input.property_matches.length} property options prepared for customer.` : 'No exact available option returned.',\n    confidence: 1,\n    related_entity_ids: { property_ids: input.property_matches.map((m) => m.id) },\n  });\n}\nif (appointmentRequest) {\n  activities.push({\n    agent_type: 'appointment',\n    action_type: 'appointment_requested',\n    reason: 'Customer requested a site visit or appointment',\n    input_summary: 'Appointment request captured.',\n    output_summary: 'Status set to requested; no confirmation promised.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (followUpTask) {\n  activities.push({\n    agent_type: 'followup',\n    action_type: 'followup_task_created',\n    reason: followUpTask.reason,\n    input_summary: `Due in ${followUpTask.due_in_hours} hours.`,\n    output_summary: `Priority: ${followUpTask.priority}.`,\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (notifyHumanWithoutBlocking && !needsHuman) {\n  activities.push({\n    agent_type: 'routing',\n    action_type: 'agent_mode_nonblocking_attention',\n    reason: appointmentIntent ? 'Appointment/site-visit interest' : q.lead_category === 'hot' ? 'Hot lead attention' : 'Low confidence but agent mode remains active',\n    input_summary: `Intent: ${intent}. Lead category: ${q.lead_category}. automation_mode=${automationMode}.`,\n    output_summary: 'No human handoff created; agent automation remains allowed to reply.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (needsHuman) {\n  activities.push({\n    agent_type: 'escalation',\n    action_type: 'human_handoff_created',\n    reason: handoffReason || 'Escalation rule matched',\n    input_summary: `Intent: ${intent}. Lead category: ${q.lead_category}.`,\n    output_summary: 'Conversation automation will pause after handoff is committed.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\n\nreturn [{\n  json: {\n    ...input,\n    appointment_request: appointmentRequest,\n    follow_up_task: followUpTask,\n    handoff: needsHuman ? { required: true, reason: handoffReason || 'Escalation rule matched', priority: q.lead_category === 'hot' ? 'high' : 'normal' } : { required: false, clear_if_agent_mode: agentModeActive },\n    conversation_update: agentModeActive ? { automation_mode: 'agent', clear_handoff_active: true, reason: 'Agent mode must be allowed to respond from n8n.' } : null,\n    outbound_message: {\n      send: Boolean(shouldSend && reply),\n      message_type: messageType,\n      content_text: reply,\n      raw_whatsapp_payload: rawWhatsappPayload,\n      google_drive_file_id: googleDriveFileId,\n      google_drive_resource_key: googleDriveResourceKey,\n    },\n    agent_activities: activities,\n  }\n}];"
+        "jsCode": "const input = $input.first().json;\nconst text = String(input.event.message_text || '').trim();\nconst lower = text.toLowerCase();\nconst intent = input.orchestrator.intent;\nconst q = input.qualification;\nconst context = input.context || {};\nconst orgName = 'EastWest Real Estates';\nconst automationMode = String(context.conversation?.automation_mode || '').trim().toLowerCase();\nconst humanOwnedModes = new Set(['human', 'manual', 'paused', 'off', 'disabled']);\nconst humanHandoffBlocksAutomation = context.conversation?.handoff_active === true && (humanOwnedModes.has(automationMode) || !automationMode);\nconst agentModeActive = automationMode === 'agent';\nconst actionId = String(input.event.interactive_reply_id || '').toLowerCase();\nconst menuWasRecentlySent = context.last_agent_menu_sent_recently === true;\n\nconst sensitiveKeywords = /\\b(legal|lawyer|loan|finance|mortgage|negotia|complaint|fraud|urgent|refund|abuse)\\b/i.test(lower);\nconst explicitHuman = intent === 'human_support' || /\\b(human|agent|person|executive|broker|call me)\\b/i.test(lower);\nconst appointmentIntent = ['appointment_request', 'appointment_change'].includes(intent) || q.requirements.site_visit_interest === 'yes' || Boolean(q.requirements.preferred_appointment_at || q.requirements.preferred_appointment_date || q.requirements.preferred_appointment_time);\n\n// Agent mode means the AI agent is allowed to continue responding.\n// Do NOT create/refresh human handoff just because confidence is low, a lead is hot,\n// or the customer asks for a site visit. Those should become CRM tasks/appointment requests\n// while the agent still sends a useful reply. Only truly human/sensitive cases create handoff.\nconst forcedHumanReason =\n  intent === 'complaint_or_sensitive' ? 'Sensitive or complaint enquiry' :\n  explicitHuman ? 'Customer requested a human agent' :\n  sensitiveKeywords ? 'Sensitive domain request' :\n  null;\nconst needsHuman = Boolean(forcedHumanReason);\nconst notifyHumanWithoutBlocking = Boolean(\n  appointmentIntent ||\n  q.lead_category === 'hot' ||\n  input.orchestrator.confidence < 0.45 ||\n  input.orchestrator.requires_human\n);\n\nconst handoffReason = forcedHumanReason;\n\nconst preferredVisitDetails = [q.requirements.preferred_appointment_date, q.requirements.preferred_appointment_time].filter(Boolean).join(' ');\nconst visitLocation = Array.isArray(q.requirements.preferred_locations) ? q.requirements.preferred_locations.filter(Boolean).join(', ') : '';\nconst visitPropertyType = String(q.requirements.property_type || '').trim();\nconst appointmentReady = Boolean(appointmentIntent && q.requirements.preferred_appointment_at && visitLocation && visitPropertyType && visitPropertyType !== 'unknown');\nconst missingVisitFields = [];\nif (!visitPropertyType || visitPropertyType === 'unknown') missingVisitFields.push('property type');\nif (!visitLocation) missingVisitFields.push('location');\nif (!q.requirements.preferred_appointment_at) missingVisitFields.push('date and time');\nlet appointmentRequest = null;\nif (appointmentReady) {\n  appointmentRequest = {\n    action: 'create_or_update_request',\n    status: 'requested',\n    preferred_at: q.requirements.preferred_appointment_at || null,\n    property_reference: q.requirements.property_reference || null,\n    property_id: null,\n    notes: `Customer requested a site visit for ${visitPropertyType.replace(/_/g, ' ')} in ${visitLocation}. Preferred time: ${preferredVisitDetails || q.requirements.preferred_appointment_at}. Human confirmation is required.`,\n  };\n}\n\nlet followUpTask = null;\nif (!input.is_opt_out_request && !context.contact?.opted_out && !humanHandoffBlocksAutomation) {\n  if (appointmentReady) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Confirm site visit request',\n      due_in_hours: 2,\n      priority: 'high',\n    };\n  } else if (q.lead_category === 'hot' && !appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Hot lead without a confirmed site visit',\n      due_in_hours: input.config.hotFollowupHours,\n      priority: 'high',\n    };\n  } else if (q.missing_fields.length && ['property_search', 'requirements_update', 'general_enquiry'].includes(intent)) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Incomplete lead qualification',\n      due_in_hours: input.config.defaultFollowupHours,\n      priority: q.lead_category === 'warm' ? 'normal' : 'low',\n    };\n  } else if (input.property_matches.length && !appointmentIntent) {\n    followUpTask = {\n      action: 'create_if_absent',\n      reason: 'Property recommendations sent without a site-visit request',\n      due_in_hours: input.config.defaultFollowupHours,\n      priority: q.lead_category === 'hot' ? 'high' : 'normal',\n    };\n  }\n}\n\nfunction formatPrice(match) {\n  if (match.price === null || match.price === undefined || match.price === '') return '';\n  const value = Number(match.price);\n  if (!Number.isFinite(value)) return '';\n  return `${match.currency || 'INR'} ${value.toLocaleString('en-IN')}`;\n}\n\nfunction propertyReply(matches) {\n  if (!matches.length) {\n    return `I could not find an exact currently available match yet. Which requirement can be flexible: locality, budget, or property type?`;\n  }\n  const lines = matches.map((m, index) => {\n    const parts = [m.title, m.locality || m.city, m.bedrooms ? `${m.bedrooms} BHK` : '', formatPrice(m)].filter(Boolean);\n    return `${index + 1}. ${parts.join(' — ')}`;\n  });\n  const requestedBedrooms = Number(q.requirements.bedrooms || 0);\n  const hasAlternative = matches.some((m) => m.is_exact_match === false || (requestedBedrooms && m.bedrooms && m.bedrooms !== requestedBedrooms));\n  const intro = hasAlternative\n    ? requestedBedrooms\n      ? `I do not have an exact ${requestedBedrooms} BHK match available right now, but here are the closest available alternatives:`\n      : 'I do not have an exact match available right now, but here are the closest available alternatives:'\n    : `I found ${matches.length} currently available option${matches.length > 1 ? 's' : ''} that may fit your requirement:`;\n  return `${intro}\\n${lines.join('\\n')}\\n\\nReply with a property number or ask to book a site visit.`;\n}\n\nconst menuPayload = {\n  type: 'button',\n  body: { text: `Welcome to ${orgName}. What would you like to do?` },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'find_property', title: 'Find Property' } },\n      { type: 'reply', reply: { id: 'book_site_visit', title: 'Book Site Visit' } },\n      { type: 'reply', reply: { id: 'talk_to_agent', title: 'Talk to Agent' } },\n    ],\n  },\n};\n\n// Interactive WhatsApp reply buttons. Requires Real Estate AI Agent backend send-message support for message_type='interactive'.\nconst menuText = `Welcome to ${orgName}. What would you like to do?`;\nconst intentMenuPayload = {\n  type: 'button',\n  body: { text: 'Great. Are you looking to buy, rent, sell, or lease?' },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'buy', title: 'Buy' } },\n      { type: 'reply', reply: { id: 'rent', title: 'Rent' } },\n      { type: 'reply', reply: { id: 'sell_lease', title: 'Sell/Lease' } },\n    ],\n  },\n};\nconst residentialTypePayload = {\n  type: 'button',\n  body: { text: 'Which kind of home do you prefer?' },\n  action: {\n    buttons: [\n      { type: 'reply', reply: { id: 'apartment', title: 'Flat/Apartment' } },\n      { type: 'reply', reply: { id: 'villa', title: 'Villa' } },\n      { type: 'reply', reply: { id: 'independent_house', title: 'Independent House' } },\n    ],\n  },\n};\n\nlet messageType = 'text';\nlet rawWhatsappPayload = null;\nlet googleDriveFileId = null;\nlet googleDriveResourceKey = null;\nlet reply = '';\nlet shouldSend = !context.contact?.opted_out && !humanHandoffBlocksAutomation;\n\nif (input.is_opt_out_request) {\n  reply = 'You have been opted out of automated follow-ups. Reply START any time to resume messages.';\n  shouldSend = true;\n} else if (humanHandoffBlocksAutomation) {\n  shouldSend = false;\n} else if (actionId === 'show_menu') {\n  messageType = 'interactive';\n  rawWhatsappPayload = menuPayload;\n  reply = menuText;\n} else if (actionId === 'find_property') {\n  messageType = 'interactive';\n  rawWhatsappPayload = intentMenuPayload;\n  reply = intentMenuPayload.body.text;\n} else if (['property_search', 'requirements_update', 'property_question', 'rent_property'].includes(intent) && !['buy', 'rent', 'sell', 'lease'].includes(q.requirements.listing_intent)) {\n  reply = q.requirements.bedrooms\n    ? `Got it — ${q.requirements.bedrooms} BHK. Are you looking to buy or rent?`\n    : q.requirements.property_type && q.requirements.property_type !== 'unknown'\n      ? `Got it — ${String(q.requirements.property_type).replace(/_/g, ' ')}. Are you looking to buy or rent?`\n      : intentMenuPayload.body.text;\n  messageType = 'interactive';\n  rawWhatsappPayload = { ...intentMenuPayload, body: { text: reply } };\n  if (input.drive_image?.file_id) {\n    googleDriveFileId = input.drive_image.file_id;\n    googleDriveResourceKey = input.drive_image.resource_key || null;\n    rawWhatsappPayload.header = { type: 'image' };\n  }\n} else if (['buy', 'rent'].includes(q.requirements.listing_intent) && q.requirements.bedrooms && (!q.requirements.property_type || q.requirements.property_type === 'unknown')) {\n  reply = `${q.requirements.bedrooms} BHK — which kind of home do you prefer?`;\n  messageType = 'interactive';\n  rawWhatsappPayload = { ...residentialTypePayload, body: { text: reply } };\n  if (input.drive_image?.file_id) {\n    googleDriveFileId = input.drive_image.file_id;\n    googleDriveResourceKey = input.drive_image.resource_key || null;\n    rawWhatsappPayload.header = { type: 'image' };\n  }\n} else if (intent === 'general_enquiry' && !q.can_match_properties) {\n  if (menuWasRecentlySent) {\n    reply = 'Tell me whether you want to buy, rent, sell, or book a site visit. You can also share your preferred location and budget.';\n  } else {\n    messageType = 'interactive';\n    rawWhatsappPayload = menuPayload;\n    reply = menuText;\n  }\n} else if (appointmentIntent) {\n  reply = appointmentReady\n    ? `Your site-visit request for ${visitPropertyType.replace(/_/g, ' ')} in ${visitLocation} on ${preferredVisitDetails || q.requirements.preferred_appointment_at} has been sent to our team. You will receive a WhatsApp confirmation after an admin confirms the slot.`\n    : `Before I send your site-visit request to our team, please share your ${missingVisitFields.join(', ').replace(/, ([^,]*)$/, ' and $1')}.`;\n  if (!visitPropertyType || visitPropertyType === 'unknown') {\n    messageType = 'interactive';\n    rawWhatsappPayload = { ...residentialTypePayload, body: { text: reply } };\n  }\n} else if (intent === 'human_support' || intent === 'complaint_or_sensitive' || needsHuman) {\n  reply = `I have notified a ${orgName} team member so they can assist you.`;\n} else if (intent === 'unknown' || input.orchestrator.confidence < 0.45) {\n  if (menuWasRecentlySent) {\n    reply = 'Please choose an option above or describe the property, location, and budget you have in mind.';\n  } else {\n    messageType = 'interactive';\n    rawWhatsappPayload = menuPayload;\n    reply = menuText;\n  }\n} else if (input.property_matches.length || q.can_match_properties) {\n  reply = propertyReply(input.property_matches);\n  if (input.drive_image?.file_id) {\n    messageType = 'image';\n    googleDriveFileId = input.drive_image.file_id;\n    googleDriveResourceKey = input.drive_image.resource_key || null;\n    rawWhatsappPayload = { google_drive_file_id: googleDriveFileId, filename: input.drive_image.filename, image_kind: input.drive_image.kind };\n    if (input.drive_image.kind === 'representative') reply = `Representative image for this property type.\\n\\n${reply}`;\n  }\n} else if (q.missing_fields.length) {\n  reply = `To suggest suitable properties, please share your ${q.missing_fields.slice(0, 2).join(' and ')}.`;\n} else {\n  reply = input.orchestrator.customer_reply_hint || `Please tell me your preferred location, budget, property type, and buying or renting timeline.`;\n}\n\nconst activities = [...input.agent_activities];\nif (context.conversation?.handoff_active === true && agentModeActive) {\n  activities.push({\n    agent_type: 'preflight',\n    action_type: 'stale_handoff_ignored',\n    reason: 'Conversation automation_mode is agent, so n8n continues even though handoff_active is true.',\n    input_summary: `automation_mode=${automationMode}; handoff_active=true`,\n    output_summary: 'Agent automation allowed to respond.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (input.property_matches.length || q.can_match_properties) {\n  activities.push({\n    agent_type: 'property_matching',\n    action_type: input.property_matches.length ? 'recommendations_prepared' : 'no_exact_match',\n    reason: 'Property-match result evaluated',\n    input_summary: 'Qualification criteria passed to matching service.',\n    output_summary: input.property_matches.length ? `${input.property_matches.length} property options prepared for customer.` : 'No exact available option returned.',\n    confidence: 1,\n    related_entity_ids: { property_ids: input.property_matches.map((m) => m.id) },\n  });\n}\nif (appointmentRequest) {\n  activities.push({\n    agent_type: 'appointment',\n    action_type: 'appointment_requested',\n    reason: 'Customer requested a site visit or appointment',\n    input_summary: 'Appointment request captured.',\n    output_summary: 'Status set to requested; no confirmation promised.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (followUpTask) {\n  activities.push({\n    agent_type: 'followup',\n    action_type: 'followup_task_created',\n    reason: followUpTask.reason,\n    input_summary: `Due in ${followUpTask.due_in_hours} hours.`,\n    output_summary: `Priority: ${followUpTask.priority}.`,\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (notifyHumanWithoutBlocking && !needsHuman) {\n  activities.push({\n    agent_type: 'routing',\n    action_type: 'agent_mode_nonblocking_attention',\n    reason: appointmentIntent ? 'Appointment/site-visit interest' : q.lead_category === 'hot' ? 'Hot lead attention' : 'Low confidence but agent mode remains active',\n    input_summary: `Intent: ${intent}. Lead category: ${q.lead_category}. automation_mode=${automationMode}.`,\n    output_summary: 'No human handoff created; agent automation remains allowed to reply.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\nif (needsHuman) {\n  activities.push({\n    agent_type: 'escalation',\n    action_type: 'human_handoff_created',\n    reason: handoffReason || 'Escalation rule matched',\n    input_summary: `Intent: ${intent}. Lead category: ${q.lead_category}.`,\n    output_summary: 'Conversation automation will pause after handoff is committed.',\n    confidence: 1,\n    related_entity_ids: {},\n  });\n}\n\nreturn [{\n  json: {\n    ...input,\n    appointment_request: appointmentRequest,\n    follow_up_task: followUpTask,\n    handoff: needsHuman ? { required: true, reason: handoffReason || 'Escalation rule matched', priority: q.lead_category === 'hot' ? 'high' : 'normal' } : { required: false, clear_if_agent_mode: agentModeActive },\n    conversation_update: agentModeActive ? { automation_mode: 'agent', clear_handoff_active: true, reason: 'Agent mode must be allowed to respond from n8n.' } : null,\n    outbound_message: {\n      send: Boolean(shouldSend && reply),\n      message_type: messageType,\n      content_text: reply,\n      raw_whatsapp_payload: rawWhatsappPayload,\n      google_drive_file_id: googleDriveFileId,\n      google_drive_resource_key: googleDriveResourceKey,\n    },\n    agent_activities: activities,\n  }\n}];"
       },
       "id": "4bc8b973-a493-46a4-9eef-d83c2aae8027",
       "name": "Appointment, Follow-up & Escalation Agents",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        12432,
-        21696
-      ]
+      "position": [12432, 21696]
     },
     {
       "parameters": {
@@ -334,10 +283,7 @@
       "name": "Build Durable Multi-Agent Plan",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        12704,
-        21696
-      ]
+      "position": [12704, 21696]
     },
     {
       "parameters": {
@@ -370,10 +316,7 @@
       "name": "Real Estate AI Agent - Commit Tenant-Scoped Agent Plan",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        12960,
-        21696
-      ],
+      "position": [12960, 21696],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000
@@ -386,10 +329,7 @@
       "name": "Merge Agent Plan Commit Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        13216,
-        21696
-      ]
+      "position": [13216, 21696]
     },
     {
       "parameters": {
@@ -406,10 +346,7 @@
       "name": "IF - Send Customer Reply?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [
-        13472,
-        21696
-      ]
+      "position": [13472, 21696]
     },
     {
       "parameters": {
@@ -442,10 +379,7 @@
       "name": "Real Estate AI Agent - Send Customer Reply & Sync Inbox",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        13744,
-        21584
-      ],
+      "position": [13744, 21584],
       "retryOnFail": false,
       "maxTries": 1,
       "waitBetweenTries": 0
@@ -458,10 +392,7 @@
       "name": "Build Event Outcome - Customer Reply Sent",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        14000,
-        21584
-      ]
+      "position": [14000, 21584]
     },
     {
       "parameters": {
@@ -471,10 +402,7 @@
       "name": "Build Event Outcome - No Reply Needed",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        13744,
-        21824
-      ]
+      "position": [13744, 21824]
     },
     {
       "parameters": {
@@ -507,10 +435,7 @@
       "name": "Real Estate AI Agent - Complete n8n Event Delivery",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        14256,
-        21696
-      ],
+      "position": [14256, 21696],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000
@@ -526,10 +451,7 @@
       "name": "V3 FIX NOTES",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        9024,
-        22000
-      ]
+      "position": [9024, 22000]
     },
     {
       "parameters": {
@@ -542,10 +464,7 @@
       "name": "V4 FIX NOTES",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        9040,
-        21920
-      ]
+      "position": [9040, 21920]
     },
     {
       "parameters": {
@@ -558,10 +477,7 @@
       "name": "V11 — INTERACTIVE BUTTONS + NO SEND RETRY",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        13536,
-        21136
-      ]
+      "position": [13536, 21136]
     }
   ],
   "pinData": {},

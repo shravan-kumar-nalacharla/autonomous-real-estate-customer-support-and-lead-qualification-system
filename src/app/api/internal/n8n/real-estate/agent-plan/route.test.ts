@@ -8,7 +8,10 @@ describe('normalizeAgentPlanBody', () => {
       {
         idempotency_key: 'n8n:real-estate:v2:event-1',
         lead_update: {
-          requirements: { preferred_locations: ['Hyderabad'] },
+          requirements: {
+            preferred_locations: ['Hyderabad'],
+            property_type: 'apartment',
+          },
           score: 75,
           category: 'hot',
           score_breakdown: [{ points: 15, reason: 'Location captured' }],
@@ -60,6 +63,40 @@ describe('normalizeAgentPlanBody', () => {
     expect(normalized.lead_score?.score).toBe(90);
     expect(normalized.human_handoff?.required).toBe(false);
     expect(normalized.activity_logs).toEqual([]);
+  });
+
+  it('does not create a CRM appointment until time, property type, and location are complete', () => {
+    const base = {
+      idempotency_key: 'event-incomplete-appointment',
+      appointment_request: {
+        preferred_at: '2026-10-13T10:00:00+05:30',
+      },
+    };
+
+    expect(
+      normalizeAgentPlanBody({
+        ...base,
+        requirements: { property_type: 'apartment', preferred_locations: [] },
+      }).appointment_request
+    ).toBeUndefined();
+    expect(
+      normalizeAgentPlanBody({
+        ...base,
+        requirements: {
+          property_type: 'unknown',
+          preferred_locations: ['Hyderabad'],
+        },
+      }).appointment_request
+    ).toBeUndefined();
+    expect(
+      normalizeAgentPlanBody({
+        ...base,
+        requirements: {
+          property_type: 'villa',
+          preferred_locations: ['Hyderabad'],
+        },
+      }).appointment_request
+    ).toMatchObject({ requested_start_at: '2026-10-13T04:30:00.000Z' });
   });
 
   it('normalizes n8n strings for typed Postgres columns', () => {
