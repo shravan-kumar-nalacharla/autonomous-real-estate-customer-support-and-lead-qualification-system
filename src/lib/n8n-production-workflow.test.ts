@@ -159,6 +159,12 @@ describe('production n8n workflow', () => {
               missing_fields: [],
             },
             property_matches: [],
+            drive_image: {
+              file_id: 'drive-2bhk',
+              filename: 'demo-sale-apartment-2bhk-bedroom-01.jpg',
+              resource_key: null,
+              kind: 'representative',
+            },
             agent_activities: [],
           },
         }),
@@ -168,8 +174,10 @@ describe('production n8n workflow', () => {
             message_type: string;
             content_text: string;
             raw_whatsapp_payload: {
+              header?: { type: string };
               action: { buttons: Array<{ reply: { id: string } }> };
             };
+            google_drive_file_id: string | null;
           };
         };
       }>;
@@ -180,6 +188,10 @@ describe('production n8n workflow', () => {
       listing_intent: 'unknown',
     })[0].json.outbound_message;
     expect(intentQuestion.message_type).toBe('interactive');
+    expect(intentQuestion.google_drive_file_id).toBe('drive-2bhk');
+    expect(intentQuestion.raw_whatsapp_payload.header).toEqual({
+      type: 'image',
+    });
     expect(intentQuestion.content_text).toContain(
       '2 BHK. Are you looking to buy or rent?'
     );
@@ -216,6 +228,7 @@ describe('production n8n workflow', () => {
     expect(villaQuestion.content_text).toContain(
       'villa. Are you looking to buy or rent?'
     );
+    expect(source).toContain("const orgName = 'EastWest Real Estates'");
   });
 
   it('asks for missing search details before querying property inventory', () => {

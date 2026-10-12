@@ -108,7 +108,8 @@ describe("sendInteractiveButtons — validation", () => {
 
     const result = await sendInteractiveButtons({
       ...BASE_ARGS,
-      headerText: "Hello",
+      headerText: "This is ignored when an image is present",
+      headerImageMediaId: "media-123",
       footerText: "Tap one",
       buttons: [
         { id: "yes", title: "Yes" },
@@ -128,7 +129,7 @@ describe("sendInteractiveButtons — validation", () => {
       interactive: {
         type: "button",
         body: { text: "Body text" },
-        header: { type: "text", text: "Hello" },
+        header: { type: "image", image: { id: "media-123" } },
         footer: { text: "Tap one" },
         action: {
           buttons: [

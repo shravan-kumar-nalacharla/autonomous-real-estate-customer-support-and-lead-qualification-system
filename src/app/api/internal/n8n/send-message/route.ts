@@ -402,7 +402,15 @@ export async function POST(request: Request) {
     const accessToken = decrypt(activeConfig.access_token);
 
     let imageMediaId: string | null = null;
-    if (messageType === 'image') {
+    const hasImageSource = Boolean(
+      body.image_url?.trim() ||
+        body.whatsapp_media_id?.trim() ||
+        body.google_drive_file_id?.trim()
+    );
+    if (
+      messageType === 'image' ||
+      (messageType === 'interactive' && hasImageSource)
+    ) {
       try {
         imageMediaId = await resolveImageMediaId({
           phoneNumberId: activeConfig.phone_number_id,
@@ -492,6 +500,7 @@ export async function POST(request: Request) {
               ? interactivePayload.header.text
               : undefined,
           footerText: interactivePayload.footer?.text,
+          headerImageMediaId: imageMediaId ?? undefined,
           buttons: interactivePayload.action.buttons.map((button) => ({
             id: button.reply.id,
             title: button.reply.title,
@@ -558,7 +567,8 @@ export async function POST(request: Request) {
       .from('messages')
       .update({
         media_url:
-          messageType === 'image' && imageMediaId
+          (messageType === 'image' || messageType === 'interactive') &&
+          imageMediaId
             ? `/api/whatsapp/media/${imageMediaId}`
             : null,
         message_id: waMessageId,
@@ -701,7 +711,8 @@ export async function reserveOutboundMessage(args: {
         ? args.contentText || null
         : args.contentText,
     media_url:
-      args.messageType === 'image' && args.imageMediaId
+      (args.messageType === 'image' || args.messageType === 'interactive') &&
+      args.imageMediaId
         ? `/api/whatsapp/media/${args.imageMediaId}`
         : null,
     template_name: args.templateName,

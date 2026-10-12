@@ -202,6 +202,27 @@ describe("reserveOutboundMessage", () => {
       idempotency_key: "n8n:outbound:1",
     });
   });
+
+  it("stores the media URL for an interactive message with an image header", async () => {
+    const db = new ReservationDb();
+    await reserveOutboundMessage({
+      db: db as never,
+      organizationId: "org-1",
+      conversationId: "conv-1",
+      messageType: "interactive",
+      contentText: "Are you looking to buy or rent?",
+      imageMediaId: "media-123",
+      templateName: null,
+      idempotencyKey: "n8n:outbound:image-buttons",
+      rawPayload: { type: "button" },
+      source: "n8n_real_estate_multi_agent",
+    });
+
+    expect(db.rows[0]).toMatchObject({
+      content_type: "interactive",
+      media_url: "/api/whatsapp/media/media-123",
+    });
+  });
 });
 
 class ReservationDb {

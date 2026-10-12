@@ -316,6 +316,8 @@ export interface SendInteractiveButtonsArgs {
   bodyText: string
   /** Optional plain-text header (≤ 60 chars). */
   headerText?: string
+  /** Optional uploaded WhatsApp image media id shown above the buttons. */
+  headerImageMediaId?: string
   /** Optional grey footer line under the buttons (≤ 60 chars). */
   footerText?: string
   /** 1–3 buttons. Validated against Meta's limits before sending. */
@@ -337,7 +339,7 @@ export async function sendInteractiveButtons(
 ): Promise<MetaSendResult> {
   const {
     phoneNumberId, accessToken, to,
-    bodyText, headerText, footerText, buttons, contextMessageId,
+    bodyText, headerText, headerImageMediaId, footerText, buttons, contextMessageId,
   } = args
   validateInteractiveBody(bodyText)
   validateInteractiveHeaderFooter(headerText, footerText)
@@ -366,7 +368,11 @@ export async function sendInteractiveButtons(
       })),
     },
   }
-  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (headerImageMediaId) {
+    interactive.header = { type: 'image', image: { id: headerImageMediaId } }
+  } else if (headerText) {
+    interactive.header = { type: 'text', text: headerText }
+  }
   if (footerText) interactive.footer = { text: footerText }
 
   const body: Record<string, unknown> = {
