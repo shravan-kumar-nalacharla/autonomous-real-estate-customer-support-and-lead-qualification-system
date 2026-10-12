@@ -406,6 +406,62 @@ describe('production n8n workflow', () => {
     );
   });
 
+  it('sends a representative image even when inventory has no matching rows', () => {
+    const source = code('Appointment, Follow-up & Escalation Agents');
+    const result = new Function('$input', source)({
+      first: () => ({
+        json: {
+          event: { message_text: 'Show 2bhk flats' },
+          config: { defaultFollowupHours: 24, hotFollowupHours: 2 },
+          context: {
+            contact: {},
+            conversation: { automation_mode: 'agent' },
+          },
+          orchestrator: {
+            intent: 'property_search',
+            confidence: 1,
+            requires_human: false,
+          },
+          is_opt_out_request: false,
+          qualification: {
+            requirements: {
+              bedrooms: 2,
+              property_type: 'apartment',
+              listing_intent: 'buy',
+            },
+            lead_category: 'warm',
+            can_match_properties: true,
+            missing_fields: [],
+          },
+          property_matches: [],
+          drive_image: {
+            file_id: 'drive-2bhk',
+            filename: 'demo-sale-apartment-2bhk-bedroom-01.jpg',
+            resource_key: null,
+            kind: 'representative',
+          },
+          agent_activities: [],
+        },
+      }),
+    }) as Array<{
+      json: {
+        outbound_message: {
+          message_type: string;
+          content_text: string;
+          google_drive_file_id: string;
+        };
+      };
+    }>;
+
+    expect(result[0].json.outbound_message).toMatchObject({
+      message_type: 'image',
+      google_drive_file_id: 'drive-2bhk',
+    });
+    expect(result[0].json.outbound_message.content_text).toContain(
+      'Representative image for this property type.'
+    );
+  });
+
   it('persists and follows up site-visit requests with customer timing', () => {
     const source = code('Appointment, Follow-up & Escalation Agents');
     expect(source).toContain("reason: 'Confirm site visit request'");
